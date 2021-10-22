@@ -1,0 +1,9 @@
+{
+    "dependencies": {
+        "browser-env": "^3.3.0",
+        "canvas": "^2.8.0",
+        "vis-data": "^7.1.2",
+        "vis-network": "^9.1.0",
+        "window": "^4.2.7"
+    }
+}

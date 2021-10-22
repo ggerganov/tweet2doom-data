@@ -1,3 +1,6 @@
 [submodule "public"]
 	path = public
 	url = https://github.com/tweet2doom/tweet2doom.github.io
+[submodule "third-party/imgui/imgui"]
+	path = third-party/imgui/imgui
+	url = https://github.com/ocornut/imgui
