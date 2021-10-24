@@ -7,6 +7,7 @@ wd=$(pwd)
 dir_tweet2doom="$wd/tweet2doom"
 
 git pull --rebase
+git submodule update --remote -- public
 
 ./random-plays.sh
 

@@ -11,6 +11,7 @@ while true ; do
 
     cd $wd/public/
 
+    git checkout master
     git pull --rebase
 
     cd $wd
