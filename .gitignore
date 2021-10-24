@@ -5,3 +5,4 @@ node_modules
 build
 build-em
 .cache
+log-sync.txt
