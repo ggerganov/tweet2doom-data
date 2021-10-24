@@ -1,6 +1,10 @@
 #!/bin/bash
 
-cd "$(dirname "$0")"
+wd=$(dirname $0)
+cd $wd/
+wd=$(pwd)
+
+cd $wd
 
 js="public/js/graph.js"
 data="public/data"
@@ -39,3 +43,6 @@ for id in `ls $data/processed` ; do
 done
 
 echo "}" >> $js
+
+cd $wd/layout/vis-network
+node main.js
