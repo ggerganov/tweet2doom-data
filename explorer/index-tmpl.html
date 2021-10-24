@@ -56,7 +56,6 @@
             <div id="container_canvas" hidden>
                 <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()"></canvas>
             </div>
-            <button id="linkOpener" onclick='window.open("https://twitter.com/tweet2doom", "_blank");' style='position: absolute;top: 0;display: none' hidden>Link opener helper</button>
         </div>
 
         <div id="footer" class="cell-version" hidden>
@@ -77,8 +76,6 @@
         <script type='text/javascript'>
             var isInitialized = false;
 
-            var actionOpenLinkUrl = '';
-
             function updateWindowSize() {
                 var w = window,
                     d = document,
@@ -90,26 +87,14 @@
                 Module._set_window_size(0.99*x, 0.99*y);
             }
 
-            async function getOpenLinkUrl() {
-                return actionOpenLinkUrl;
-            }
-
             window.setInterval(function(){
                 if (mobileCheck()) {
                     document.getElementById("footer").innerHTML = '';
                 }
-                if (isInitialized == false) return;
-                updateWindowSize();
 
-                var openId = Module.get_action_open_id();
-                if (openId.length > 0) {
-                    actionOpenLinkUrl = 'https://twitter.com/tweet2doom/status/' + openId;
-                    windowReference = window.open("about:blank", "_blank");
-                    getOpenLinkUrl().then(function(url) {
-                        if (url.length <= 0) return;
-                        windowReference.location = url;
-                    });
-                }
+                if (isInitialized == false) return;
+
+                updateWindowSize();
             }, 500);
 
             function onkeydown(event) {
@@ -124,6 +109,16 @@
                 }
             }
 
+            function checkForActions(event) {
+                setTimeout(function() { 
+                    var openId = Module.get_action_open_id();
+                    if (openId.length > 0) {
+                        var url = 'https://twitter.com/tweet2doom/status/' + openId;
+                        window.open(url, '_blank').focus();
+                    }
+                }, 250);
+            }
+
             function init() {
                 document.getElementById('container_status').innerHTML = "WebAssembly module initialized successfully! Press the Init button to start:"
                 document.getElementById('container_status').style.color = "#00ff00";
@@ -131,6 +126,8 @@
                 document.getElementById("butInit").disabled = false;
 
                 window.addEventListener('keydown', onkeydown, true);
+                window.addEventListener('touchend', checkForActions, true);
+                window.addEventListener('mouseup', checkForActions, true);
             }
 
             function doInit() {
@@ -182,8 +179,6 @@
                 if (mobileCheck()) {
                     var hammertime = new Hammer(canvas, {});
                     hammertime.get('pinch').set({ enable: true });
-                    //hammertime.get('pinchstart').set({ enable: true });
-                    //hammertime.get('pinchend').set({ enable: true });
                     hammertime.on('pinchstart pinch pinchend', function(ev) {
                         //window.alert(ev.scale);
                         //window.alert(JSON.stringify(ev));
@@ -204,8 +199,8 @@
                 arguments: [],
                 preRun: [(function() { }) ],
                 postRun: [(function () {
+                    init();
                     doInit();
-                    //init();
                 })
                 ],
                 canvas: (function() {
