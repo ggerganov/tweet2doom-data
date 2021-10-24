@@ -6,3 +6,6 @@ build
 build-em
 .cache
 log-sync.txt
+tmp
+.env
+.savegame
