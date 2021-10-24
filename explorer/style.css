@@ -9,6 +9,7 @@ body {
     background-attachment: fixed;
     background-position: center;
     background-repeat: no-repeat;
+    background-size: contain;
     -webkit-font-smoothing: subpixel-antialiased;
     font-smoothing: subpixel-antialiased;
 }
@@ -339,3 +340,54 @@ svg {
     -webkit-filter: invert(100%); /* safari 6.0 - 9.0 */
     filter: invert(100%);
 }
+
+.fade-in {
+    animation: fadeIn ease 1.0s;
+    -webkit-animation: fadeIn ease 1.0s;
+    -moz-animation: fadeIn ease 1.0s;
+    -o-animation: fadeIn ease 1.0s;
+    -ms-animation: fadeIn ease 1.0s;
+}
+@keyframes fadeIn {
+    0% {
+        opacity:0;
+    }
+    100% {
+        opacity:1;
+    }
+}
+
+@-moz-keyframes fadeIn {
+    0% {
+        opacity:0;
+    }
+    100% {
+        opacity:1;
+    }
+}
+
+@-webkit-keyframes fadeIn {
+    0% {
+        opacity:0;
+    }
+    100% {
+        opacity:1;
+    }
+}
+
+@-o-keyframes fadeIn {
+    0% {
+        opacity:0;
+    }
+    100% {
+        opacity:1;
+    }
+}
+
+@-ms-keyframes fadeIn {
+    0% {
+        opacity:0;
+    }
+    100% {
+        opacity:1;
+    }
