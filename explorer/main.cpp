@@ -450,6 +450,8 @@ void renderMain() {
         drawList->AddRectFilled({ 0.0f, 0.0f }, wSize, col);
     }
 
+    const bool isAnimating = T < g_state.anim.t1;
+
     const float scale = g_state.scale(g_state.viewCur.z);
     const float iscale = (1.0/scale)/ImGui::GetIO().DisplayFramebufferScale.x;
 
@@ -513,7 +515,11 @@ void renderMain() {
     }
 
     ImGui::SetWindowFontScale(1.0f*iscale/kFontScale);
+    drawList->PushTextureID((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR));
+    // render nodes
     for (const auto & [id, node] : g_nodes) {
+        if (node.type == 2) continue;
+
         const ImVec2 pos = {
             (node.x - xmin)*idx*wSize.x,
             (node.y - ymin)*idy*wSize.y,
@@ -528,54 +534,88 @@ void renderMain() {
             ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 1.0f }) :
             ImGui::ColorConvertFloat4ToU32({ float(0x00)/256.0f, float(0xFF)/256.0f, float(0x7D)/256.0f, 1.0f });
 
-        ImVec2 h0 = { pos.x - 2.0f*radius, pos.y - 2.0f*radius };
-        ImVec2 h1 = { pos.x + 2.0f*radius, pos.y + 2.0f*radius };
+        const ImVec2 h0 = { pos.x - 2.0f*radius, pos.y - 2.0f*radius };
+        const ImVec2 h1 = { pos.x + 2.0f*radius, pos.y + 2.0f*radius };
 
-        if (node.type == 2) {
-            const ImVec2 tSize = ImGui::CalcTextSize(node.username.c_str());
-            const ImVec2 tMargin = { 12.0f*iscale, 8.0f*iscale, };
-            const ImVec2 pt = {pos.x - 0.5f*tSize.x, pos.y - 0.5f*tSize.y, };
-            const ImVec2 p0 = {pos.x - 0.5f*tSize.x - tMargin.x, pos.y - 0.5f*tSize.y - tMargin.y, };
-            const ImVec2 p1 = {pos.x + 0.5f*tSize.x + tMargin.x, pos.y + 0.5f*tSize.y + tMargin.y, };
+        if (node.type == 0) {
+            const float w = (1.8f*radius);
+            const float h = (3.2f*radius);
 
-            if (g_state.viewCur.z > 0.98) {
-                drawList->AddRectFilled(p0, p1, col, 8.0);
-                if (g_state.viewCur.z > 0.996) {
-                    ImGui::SetCursorScreenPos(pt);
-                    ImGui::Text("%s", node.username.c_str());
-                }
-            } else {
-                drawList->AddRectFilled(p0, p1, col);
-            }
-
-            h0 = p0;
-            h1 = p1;
+            ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
+            ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_BIG), { 2.0f*w, 2.0f*h });
         } else {
-            if (node.type == 0) {
-                const float w = (1.8f*radius);
-                const float h = (3.2f*radius);
+            if (g_state.viewCur.z > 0.900) {
+                const float w = (1.0f*radius);
+                const float h = (1.0f*radius);
 
                 ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
-                ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_BIG), { 2.0f*w, 2.0f*h });
+                ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { 2.0f*w, 2.0f*h });
+            } else if (g_state.viewCur.z > 0.500) {
+                drawList->AddCircleFilled(pos, radius, col);
             } else {
-                if (g_state.viewCur.z > 0.998) {
-                    const float w = (1.0f*radius);
-                    const float h = (1.0f*radius);
-
-                    ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
-                    ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { 2.0f*w, 2.0f*h });
-                } else if (g_state.viewCur.z > 0.90) {
-                    drawList->AddCircleFilled(pos, radius, col);
-                } else {
-                    drawList->AddRectFilled({ float(pos.x - radius), float(pos.y - radius) }, { float(pos.x + radius), float(pos.y + radius) }, col);
-                }
+                drawList->AddRectFilled({ float(pos.x - radius), float(pos.y - radius) }, { float(pos.x + radius), float(pos.y + radius) }, col);
             }
         }
 
+        // TODO: deduplicate
         if (g_state.viewCur.z > 0.90 && g_state.selectedId.empty()) {
             if (ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*g_state.heightControls) {
                 if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
-                    if (ImGui::IsMouseReleased(0) && g_state.isPanning == false) {
+                    if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
+                        auto pm = ImGui::GetMousePos();
+                        pm.x = h1.x;
+                        pm.y = h0.y;
+                        ImGui::SetNextWindowPos(pm);
+
+                        ImGui::OpenPopup("Node");
+                        g_state.selectedId = id;
+                    }
+                }
+            }
+        }
+    }
+    drawList->PopTextureID();
+
+    // render commands
+    for (const auto & [id, node] : g_nodes) {
+        if (node.type != 2) continue;
+
+        const ImVec2 pos = {
+            (node.x - xmin)*idx*wSize.x,
+            (node.y - ymin)*idy*wSize.y,
+        };
+
+        const float radius = std::max(0.5f, (node.type == 0 ? 92.0f : 32.0f)*iscale);
+
+        if (pos.x < -2.0*radius || pos.x > wSize.x + 2.0*radius) continue;
+        if (pos.y < -2.0*radius || pos.y > wSize.y + 2.0*radius) continue;
+
+        const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 1.0f });
+
+        const ImVec2 tSize = ImGui::CalcTextSize(node.username.c_str());
+        const ImVec2 tMargin = { 12.0f*iscale, 8.0f*iscale, };
+        const ImVec2 pt = {pos.x - 0.5f*tSize.x, pos.y - 0.5f*tSize.y, };
+        const ImVec2 p0 = {pos.x - 0.5f*tSize.x - tMargin.x, pos.y - 0.5f*tSize.y - tMargin.y, };
+        const ImVec2 p1 = {pos.x + 0.5f*tSize.x + tMargin.x, pos.y + 0.5f*tSize.y + tMargin.y, };
+
+        if (g_state.viewCur.z > 0.98) {
+            drawList->AddRectFilled(p0, p1, col, 8.0);
+            if (g_state.viewCur.z > 0.980) {
+                ImGui::SetCursorScreenPos(pt);
+                ImGui::Text("%s", node.username.c_str());
+            }
+        } else {
+            drawList->AddRectFilled(p0, p1, col);
+        }
+
+        const ImVec2 h0 = p0;
+        const ImVec2 h1 = p1;
+
+        // TODO: deduplicate
+        if (g_state.viewCur.z > 0.90 && g_state.selectedId.empty()) {
+            if (ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*g_state.heightControls) {
+                if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
+                    if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
                         auto pm = ImGui::GetMousePos();
                         pm.x = h1.x;
                         pm.y = h0.y;
