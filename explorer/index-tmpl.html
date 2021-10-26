@@ -42,7 +42,7 @@
     </head>
     <body>
         <div id="main-container">
-            <div id="description" align="center" hidden>
+            <div id="description" align="center">
                 <h2>Tweet2Doom - State Tree Explorer</h2>
 
                 <div id="container_status" align="center">
@@ -54,7 +54,7 @@
                 </div>
             </div>
             <div id="container_canvas" hidden>
-                <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+                <canvas class="emscripten" id="canvas"></canvas>
             </div>
         </div>
 
@@ -75,6 +75,7 @@
 
         <script type='text/javascript'>
             var isInitialized = false;
+            var failedToInitialize = false;
 
             function updateWindowSize() {
                 var w = window,
@@ -98,13 +99,16 @@
             }, 500);
 
             function onkeydown(event) {
-                if (event.keyCode >= 112 && event.keyCode <= 123) {
+                if (event.ctrlKey ||
+                    (event.keyCode >= 112 && event.keyCode <= 123)) {
                     event.stopImmediatePropagation();
-                } else if (
-                        event.keyCode == 8 || // Backspace
-                        event.keyCode == 9 || // Tab
-                        event.keyCode == 46 || // Delete
-                        (event.keyCode >= 37 && event.keyCode <= 40)) { // Arrow keys
+                    return;
+                }
+
+                if (event.keyCode == 8 || // Backspace
+                    event.keyCode == 9 || // Tab
+                    event.keyCode == 46 || // Delete
+                    (event.keyCode >= 37 && event.keyCode <= 40)) { // Arrow keys
                     event.preventDefault();
                 }
             }
@@ -172,27 +176,34 @@
                     isInitialized = true;
                 }
 
-                var canvas = document.getElementById("container_canvas");
-                canvas.hidden = false;
-                canvas.classList.add("fade-in");
+                {
+                    var status = document.getElementById("description");
+                    status.hidden = true;
+                }
 
-                // does not work well with touch pads
-                if (mobileCheck()) {
-                    var hammertime = new Hammer(canvas, {});
-                    hammertime.get('pinch').set({ enable: true });
-                    hammertime.on('pinchstart pinch pinchend', function(ev) {
-                        //window.alert(ev.scale);
-                        //window.alert(JSON.stringify(ev));
-                        if (ev.type == 'pinchstart') {
-                            Module._set_pinch(ev.center.x, ev.center.y, ev.scale, 0);
-                        }
-                        if (ev.type == 'pinch') {
-                            Module._set_pinch(ev.center.x, ev.center.y, ev.scale, 1);
-                        }
-                        if (ev.type == 'pinchend') {
-                            Module._set_pinch(ev.center.x, ev.center.y, ev.scale, 2);
-                        }
-                    });
+                {
+                    var canvas = document.getElementById("container_canvas");
+                    canvas.hidden = false;
+                    canvas.classList.add("fade-in");
+
+                    // does not work well with touch pads
+                    if (mobileCheck()) {
+                        var hammertime = new Hammer(canvas, {});
+                        hammertime.get('pinch').set({ enable: true });
+                        hammertime.on('pinchstart pinch pinchend', function(ev) {
+                            //window.alert(ev.scale);
+                            //window.alert(JSON.stringify(ev));
+                            if (ev.type == 'pinchstart') {
+                                Module._set_pinch(ev.center.x, ev.center.y, ev.scale, 0);
+                            }
+                            if (ev.type == 'pinch') {
+                                Module._set_pinch(ev.center.x, ev.center.y, ev.scale, 1);
+                            }
+                            if (ev.type == 'pinchend') {
+                                Module._set_pinch(ev.center.x, ev.center.y, ev.scale, 2);
+                            }
+                        });
+                    }
                 }
             }
 
@@ -200,6 +211,8 @@
                 arguments: [],
                 preRun: [(function() { }) ],
                 postRun: [(function () {
+                    if (failedToInitialize) return;
+
                     init();
                     doInit();
                 })
@@ -229,8 +242,10 @@
             };
 
             window.onerror = function() {
+                failedToInitialize = true;
                 console.log("onerror: " + JSON.stringify(event));
                 document.getElementById('container_status').innerHTML = JSON.stringify(event);
+                document.getElementById('container_status').innerHTML += '<br>This browser is not supported. Please try a different browser';
                 document.getElementById('container_status').style.color = "#ff0000";
                 document.getElementById('container_button').hidden = true;
             };
