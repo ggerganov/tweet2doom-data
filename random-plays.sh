@@ -49,7 +49,7 @@ for i in $nodes_render ; do
         -render_input \
         -render_username || result=$?
 
-    $dir_tweet2doom/parse-history data/nodes/$i/history.txt 350 35 tmp/command_$i > /dev/null
+    $dir_tweet2doom/parse-history public/data/nodes/$i/history.txt 350 35 tmp/command_$i > /dev/null
 done
 
 j=0
