@@ -2,9 +2,6 @@
 
 #include "common.h"
 
-#include "core/frame-buffer.h"
-#include "core/shader-program.h"
-
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/bind.h>
@@ -25,6 +22,11 @@
 #include <fstream>
 #include <vector>
 #include <functional>
+
+#ifdef USE_LINE_SHADER
+#include "core/frame-buffer.h"
+#include "core/shader-program.h"
+#endif
 
 const float kFontScale = 2.0f;
 
@@ -317,11 +319,16 @@ struct State {
 
     int nSkipUpdate = 0;
 
+    // rendering options
+    float renderingEdgesMinZ = 0.0f;
+
     // open action
     std::string actionOpenId = "";
 
+#ifdef USE_LINE_SHADER
     ::ImVid::FrameBuffer fboEdges;
     ::ImVid::ShaderProgram shaderEdges;
+#endif
 
     float scale(float z) const { return 0.5 + (1.0 - zoomFromLog(z))*sceneScale; }
     void onWindowResize() {
@@ -451,9 +458,30 @@ void renderMain() {
     const float idx = 1.0f/dx;
     const float idy = 1.0f/dy;
 
-    // imgui line rendering - disabled
-    if (g_state.viewCur.z > 2.00f) {
-        const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xF2)/256.0f, 1.0f });
+    if (g_state.viewCur.z >= g_state.renderingEdgesMinZ) {
+#ifdef USE_LINE_SHADER
+        // shader-based line rendering
+        const float f = scale/g_state.scaleEdges;
+        const float ds = 0.5*(1.0 - f);
+        const float dx = f*(g_state.viewCur.x - g_state.posEdgesX)*idx;
+        const float dy = f*(g_state.viewCur.y - g_state.posEdgesY)*idy;
+
+        const float x0 = ds + dx;
+        const float x1 = 1.0f - ds + dx;
+
+        const float y0 = ds + dy;
+        const float y1 = 1.0f - ds + dy;
+
+        const float px0 = 0.25 + 0.25*(x0 + x1) - 0.25*(x1 - x0);
+        const float px1 = 0.25 + 0.25*(x0 + x1) + 0.25*(x1 - x0);
+        const float py0 = 0.25 + 0.25*(y0 + y1) - 0.25*(y1 - y0);
+        const float py1 = 0.25 + 0.25*(y0 + y1) + 0.25*(y1 - y0);
+
+        ImGui::SetCursorScreenPos({ 0.0f, 0.0f, });
+        ImGui::Image((void *)(intptr_t) g_state.fboEdges.getIdTex(), ImGui::GetContentRegionAvail(), { px0, py0, }, { px1, py1, });
+#else
+        // imgui line rendering
+        const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xF2)/256.0f, 0.5f });
         const auto thickness = std::max(0.1, 2.0*iscale);
 
         for (const auto & edge : g_edges) {
@@ -476,26 +504,7 @@ void renderMain() {
 
             drawList->AddLine(p0, p1, col, thickness);
         }
-    } else if (g_state.viewCur.z > 0.9f) {
-        // shader-based line rendering
-        const float f = scale/g_state.scaleEdges;
-        const float ds = 0.5*(1.0 - f);
-        const float dx = f*(g_state.viewCur.x - g_state.posEdgesX)*idx;
-        const float dy = f*(g_state.viewCur.y - g_state.posEdgesY)*idy;
-
-        const float x0 = ds + dx;
-        const float x1 = 1.0f - ds + dx;
-
-        const float y0 = ds + dy;
-        const float y1 = 1.0f - ds + dy;
-
-        const float px0 = 0.25 + 0.25*(x0 + x1) - 0.25*(x1 - x0);
-        const float px1 = 0.25 + 0.25*(x0 + x1) + 0.25*(x1 - x0);
-        const float py0 = 0.25 + 0.25*(y0 + y1) - 0.25*(y1 - y0);
-        const float py1 = 0.25 + 0.25*(y0 + y1) + 0.25*(y1 - y0);
-
-        ImGui::SetCursorScreenPos({ 0.0f, 0.0f, });
-        ImGui::Image((void *)(intptr_t) g_state.fboEdges.getIdTex(), ImGui::GetContentRegionAvail(), { px0, py0, }, { px1, py1, });
+#endif
     }
 
     ImGui::SetWindowFontScale(1.0f*iscale/kFontScale);
@@ -812,12 +821,14 @@ void updatePre() {
         g_state.treeChanged = false;
     }
 
+#ifdef USE_LINE_SHADER
     if (g_state.shaderEdges.isValid() == false) {
         if (g_state.shaderEdges.createLineRender() == false) {
             fprintf(stderr, "Error: Failed to create line shader!\n");
             throw 1;
         }
     }
+#endif
 
     g_state.isMoving = false;
     g_state.isZooming = false;
@@ -908,7 +919,7 @@ void updatePre() {
                 g_state.anim.v1 = vt;
                 g_state.anim.type = 2;
 
-                g_state.nUpdates = 2;
+                g_state.nUpdates = 1;
             }
 
             //printf("%g %g\n", g_state.viewCur.z, g_state.zoomTgt);
@@ -932,6 +943,7 @@ void updatePre() {
     const float idx = 1.0f/(xmax - xmin);
     const float idy = 1.0f/(ymax - ymin);
 
+#ifdef USE_LINE_SHADER
     if (
             g_state.forceRender ||
             (
@@ -987,9 +999,10 @@ void updatePre() {
 
         g_state.forceRender = false;
     }
+#endif
 
     if (g_state.isMoving || g_state.isZooming) {
-        g_state.nUpdates = 2;
+        g_state.nUpdates = 1;
     }
 
     if (T >= g_state.anim.t1) {
@@ -1104,7 +1117,7 @@ int main(int argc, char** argv) {
         g_state.sizey0 = g_state.sizex0*g_state.aspectRatio;
         g_state.onWindowResize();
         g_state.forceRender = true;
-        g_state.nUpdates = 2;
+        g_state.nUpdates = 1;
     };
 
     g_setPinch = [&](float x, float y, float scale, int type) {
@@ -1122,7 +1135,7 @@ int main(int argc, char** argv) {
     g_mainUpdate = [&]() {
         // framerate throtling when idle
         --g_state.nUpdates;
-        if (g_state.nUpdates < -10) g_state.nUpdates = 1;
+        if (g_state.nUpdates < -30) g_state.nUpdates = 0;
 
         if (isInitialized == false) {
             return true;
@@ -1131,7 +1144,7 @@ int main(int argc, char** argv) {
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
-            g_state.nUpdates = 1;
+            g_state.nUpdates = 0;
             ImGui_ProcessEvent(&event);
             if (event.type == SDL_QUIT) return false;
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window)) return false;

@@ -48,10 +48,6 @@
                 <div id="container_status" align="center">
                     Loading WebAssembly module - please wait ...
                 </div>
-                <div id="container_button" align="center">
-                    <br>
-                    <button onClick="doInit()" id="butInit" style="width:60px;height:30px;" disabled>Init</button>
-                </div>
             </div>
             <div id="container_canvas" hidden>
                 <canvas class="emscripten" id="canvas"></canvas>
@@ -127,8 +123,6 @@
                 document.getElementById('container_status').innerHTML = "WebAssembly module initialized successfully! Press the Init button to start:"
                 document.getElementById('container_status').style.color = "#00ff00";
 
-                document.getElementById("butInit").disabled = false;
-
                 window.addEventListener('keydown', onkeydown, true);
                 window.addEventListener('touchend', checkForActions, true);
                 window.addEventListener('mouseup', checkForActions, true);
@@ -169,10 +163,6 @@
                     Module._do_init();
                     updateWindowSize();
 
-                    var el = document.getElementById("container_status");
-                    el.parentNode.removeChild(el);
-                    el = document.getElementById("container_button");
-                    el.parentNode.removeChild(el);
                     isInitialized = true;
                 }
 
@@ -241,13 +231,12 @@
                 }
             };
 
-            window.onerror = function() {
+            window.onerror = function(event) {
                 failedToInitialize = true;
                 console.log("onerror: " + JSON.stringify(event));
                 document.getElementById('container_status').innerHTML = JSON.stringify(event);
                 document.getElementById('container_status').innerHTML += '<br>This browser is not supported. Please try a different browser';
                 document.getElementById('container_status').style.color = "#ff0000";
-                document.getElementById('container_button').hidden = true;
             };
         </script>
 

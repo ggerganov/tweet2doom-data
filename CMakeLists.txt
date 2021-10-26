@@ -30,6 +30,14 @@ option(T2DD_SANITIZE_THREAD         "T2DT2DDable thread sanitizer" OFF)
 option(T2DD_SANITIZE_ADDRESS        "T2DD: enable address sanitizer" OFF)
 option(T2DD_SANITIZE_UNDEFINED      "T2DD: enable undefined sanitizer" OFF)
 
+#Use GL ES3 to render lines using shader
+#Not supported in all browsers
+option(T2DD_USE_LINE_SHADER         "T2DD: render lines using shader" OFF)
+
+if (T2DD_USE_LINE_SHADER)
+    add_compile_definitions(USE_LINE_SHADER=1)
+endif()
+
 # sanitizers
 
 if (T2DD_SANITIZE_THREAD)
@@ -50,16 +58,20 @@ endif()
 # dependencies
 
 if (EMSCRIPTEN)
-    #-s USE_PTHREADS=1 \
     set(CMAKE_CXX_FLAGS " \
+    -s USE_SDL=2 \
+    -s DISABLE_EXCEPTION_CATCHING=1 \
+    ")
+
+    set(CMAKE_EXE_LINKER_FLAGS " \
     --bind \
     -s ALLOW_MEMORY_GROWTH=1 \
     -s NO_EXIT_RUNTIME=0 \
-    -s USE_SDL=2 \
-    -s USE_WEBGL2=1 \
-    -s FULL_ES3=1 \
-    -s DISABLE_EXCEPTION_CATCHING=1 \
     ")
+
+    if (T2DD_USE_LINE_SHADER)
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_CXX_FLAGS} -s USE_WEBGL2=1")
+    endif()
 else()
     find_package(SDL2 REQUIRED)
     string(STRIP "${SDL2_LIBRARIES}" SDL2_LIBRARIES)

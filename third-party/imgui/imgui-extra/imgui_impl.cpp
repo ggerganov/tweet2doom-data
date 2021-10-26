@@ -16,7 +16,11 @@ bool ImGui_PreInit() {
 #elif __EMSCRIPTEN__
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#ifdef USE_LINE_SHADER
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+#else
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+#endif
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #else
     // GL 3.0 + GLSL 130
@@ -40,8 +44,11 @@ ImGuiContext* ImGui_Init(SDL_Window* window, SDL_GLContext gl_context) {
     // GL 3.2 Core + GLSL 150
     const char* glsl_version = "#version 150";
 #elif __EMSCRIPTEN__
-    //const char* glsl_version = "#version 100";
+#ifdef USE_LINE_SHADER
     const char* glsl_version = "#version 300 es";
+#else
+    const char* glsl_version = "#version 100";
+#endif
 #else
     // GL 3.0 + GLSL 130
     const char* glsl_version = "#version 130";
