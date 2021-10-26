@@ -2,6 +2,8 @@
 
 #include "common.h"
 
+#include "core/assets.h"
+
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/bind.h>
@@ -308,6 +310,7 @@ struct State {
     bool isFirstChange = true;
     bool isMouseDown = false;
     bool isPinching = false;
+    bool isPanning = false;
     bool forceRender = false;
 
     float mouseDownX = 0.0f;
@@ -324,6 +327,8 @@ struct State {
 
     // open action
     std::string actionOpenId = "";
+
+    ::ImVid::Assets assets;
 
 #ifdef USE_LINE_SHADER
     ::ImVid::FrameBuffer fboEdges;
@@ -481,7 +486,7 @@ void renderMain() {
         ImGui::Image((void *)(intptr_t) g_state.fboEdges.getIdTex(), ImGui::GetContentRegionAvail(), { px0, py0, }, { px1, py1, });
 #else
         // imgui line rendering
-        const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xF2)/256.0f, 0.5f });
+        const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xF2)/256.0f, 0.40f });
         const auto thickness = std::max(0.1, 2.0*iscale);
 
         for (const auto & edge : g_edges) {
@@ -514,14 +519,14 @@ void renderMain() {
             (node.y - ymin)*idy*wSize.y,
         };
 
-        const float radius = std::max(0.5, 16.0*iscale);
+        const float radius = std::max(0.5f, (node.type == 0 ? 92.0f : 32.0f)*iscale);
 
         if (pos.x < -2.0*radius || pos.x > wSize.x + 2.0*radius) continue;
         if (pos.y < -2.0*radius || pos.y > wSize.y + 2.0*radius) continue;
 
         const auto col = node.type == 2 ?
             ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 1.0f }) :
-            ImGui::ColorConvertFloat4ToU32({ float(0x0A)/256.0f, float(0xFF)/256.0f, float(0x16)/256.0f, 1.0f });
+            ImGui::ColorConvertFloat4ToU32({ float(0x00)/256.0f, float(0xFF)/256.0f, float(0x7D)/256.0f, 1.0f });
 
         ImVec2 h0 = { pos.x - 2.0f*radius, pos.y - 2.0f*radius };
         ImVec2 h1 = { pos.x + 2.0f*radius, pos.y + 2.0f*radius };
@@ -533,9 +538,9 @@ void renderMain() {
             const ImVec2 p0 = {pos.x - 0.5f*tSize.x - tMargin.x, pos.y - 0.5f*tSize.y - tMargin.y, };
             const ImVec2 p1 = {pos.x + 0.5f*tSize.x + tMargin.x, pos.y + 0.5f*tSize.y + tMargin.y, };
 
-            if (g_state.viewCur.z > 0.95) {
+            if (g_state.viewCur.z > 0.98) {
                 drawList->AddRectFilled(p0, p1, col, 8.0);
-                if (g_state.viewCur.z > 0.99) {
+                if (g_state.viewCur.z > 0.996) {
                     ImGui::SetCursorScreenPos(pt);
                     ImGui::Text("%s", node.username.c_str());
                 }
@@ -546,23 +551,39 @@ void renderMain() {
             h0 = p0;
             h1 = p1;
         } else {
-            if (g_state.viewCur.z > 0.90) {
-                drawList->AddCircleFilled(pos, radius, col);
+            if (node.type == 0) {
+                const float w = (1.8f*radius);
+                const float h = (3.2f*radius);
+
+                ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
+                ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_BIG), { 2.0f*w, 2.0f*h });
             } else {
-                drawList->AddRectFilled({ float(pos.x - radius), float(pos.y - radius) }, { float(pos.x + radius), float(pos.y + radius) }, col);
+                if (g_state.viewCur.z > 0.998) {
+                    const float w = (1.0f*radius);
+                    const float h = (1.0f*radius);
+
+                    ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
+                    ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { 2.0f*w, 2.0f*h });
+                } else if (g_state.viewCur.z > 0.90) {
+                    drawList->AddCircleFilled(pos, radius, col);
+                } else {
+                    drawList->AddRectFilled({ float(pos.x - radius), float(pos.y - radius) }, { float(pos.x + radius), float(pos.y + radius) }, col);
+                }
             }
         }
 
         if (g_state.viewCur.z > 0.90 && g_state.selectedId.empty()) {
-            if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
-                if (ImGui::IsMouseReleased(0)) {
-                    auto pm = ImGui::GetMousePos();
-                    pm.x = h1.x;
-                    pm.y = h0.y;
-                    ImGui::SetNextWindowPos(pm);
+            if (ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*g_state.heightControls) {
+                if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
+                    if (ImGui::IsMouseReleased(0) && g_state.isPanning == false) {
+                        auto pm = ImGui::GetMousePos();
+                        pm.x = h1.x;
+                        pm.y = h0.y;
+                        ImGui::SetNextWindowPos(pm);
 
-                    ImGui::OpenPopup("Node");
-                    g_state.selectedId = id;
+                        ImGui::OpenPopup("Node");
+                        g_state.selectedId = id;
+                    }
                 }
             }
         }
@@ -711,7 +732,8 @@ void renderMain() {
     ImGui::SetWindowFontScale(1.0f/kFontScale);
 
     ImGui::SetCursorScreenPos({ 0.0f, 0.0f, });
-    ImGui::Text("%g", ImGui::GetIO().Framerate);
+    ImGui::Text("%g", g_state.viewCur.z);
+    //ImGui::Text("%g", ImGui::GetIO().Framerate);
     //ImGui::Text("%g %g", ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
     //ImGui::Text("%g %g", ImGui::GetIO().DisplayFramebufferScale.x, ImGui::GetIO().DisplayFramebufferScale.y);
     //ImGui::Text("%g, %g", g_state.pinchScale, g_state.viewCur.z);
@@ -765,9 +787,9 @@ void updatePre() {
                 printf("Root node: %s %g %g\n", id.c_str(), node.x, node.y);
             }
 
-            //if (node.level < 1) {
-            //    node.y -= 1000;
-            //}
+            if (node.level < 1) {
+                node.y -= 200;
+            }
 
             //if (node.level < 100) {
             //    node.y -= std::pow((100.0 - node.level)/100.0, 4)*10000;
@@ -788,8 +810,8 @@ void updatePre() {
         if (g_state.isFirstChange) {
             if (g_state.focusId.empty() || g_nodes.find(g_state.focusId) == g_nodes.end()) {
                 g_state.viewCur.x = g_nodes[g_state.rootId].x;
-                g_state.viewCur.y = g_nodes[g_state.rootId].y + 0.2f*g_state.sizey0;
-                g_state.viewCur.z = 1.0f;
+                g_state.viewCur.y = g_nodes[g_state.rootId].y + 0.1f*g_state.sizey0;
+                g_state.viewCur.z = 0.999f;
 
                 g_state.anim.t0 = T + 1.0f;
                 g_state.anim.t1 = T + 4.0f;
@@ -850,6 +872,7 @@ void updatePre() {
 
             if (ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*g_state.heightControls) {
                 if (ImGui::IsMouseDown(0) && g_state.isPinching == false) {
+                    // panning
                     if (g_state.isMouseDown == false) {
                         g_state.mouseDownX = ImGui::GetIO().MousePos.x;
                         g_state.mouseDownY = ImGui::GetIO().MousePos.y;
@@ -860,6 +883,8 @@ void updatePre() {
 
                     if (std::fabs(ImGui::GetIO().MousePos.x - g_state.mouseDownX) > 5.0f ||
                         std::fabs(ImGui::GetIO().MousePos.y - g_state.mouseDownY) > 5.0f) {
+                        g_state.isPanning = true;
+
                         vt.x = g_state.posDownX - (ImGui::GetIO().MousePos.x - g_state.mouseDownX)*scale*(g_state.sizex0/ImGui::GetIO().DisplaySize.x);
                         vt.y = g_state.posDownY - (ImGui::GetIO().MousePos.y - g_state.mouseDownY)*scale*(g_state.sizey0/ImGui::GetIO().DisplaySize.y);
 
@@ -867,6 +892,7 @@ void updatePre() {
                     }
                 } else {
                     g_state.isMouseDown = false;
+                    g_state.isPanning = false;
                 }
 
                 if (ImGui::IsMouseDoubleClicked(0)) {
@@ -1053,6 +1079,14 @@ int main(int argc, char** argv) {
     ImGui_Init(window, gl_context);
     ImGui::GetIO().IniFilename = nullptr;
 
+    // loading assets and fonts
+
+#ifdef __EMSCRIPTEN__
+        g_state.assets.load(".");
+#else
+        g_state.assets.load("../images");
+#endif
+
     {
         bool isNotLoaded = true;
         const float fontSize = 14.0f*kFontScale;
@@ -1087,6 +1121,11 @@ int main(int argc, char** argv) {
     cfg.SizePixels = 13.0f*kFontScale;
     //cfg.OversampleH = 3;
     ImGui::GetIO().Fonts->AddFontDefault(&cfg);
+
+    ImGui_BeginFrame(window);
+    ImGui::NewFrame();
+    ImGui::EndFrame();
+    ImGui_EndFrame(window);
 
     bool isInitialized = false;
 
@@ -1144,7 +1183,7 @@ int main(int argc, char** argv) {
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
-            g_state.nUpdates = 0;
+            g_state.nUpdates = 5;
             ImGui_ProcessEvent(&event);
             if (event.type == SDL_QUIT) return false;
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window)) return false;

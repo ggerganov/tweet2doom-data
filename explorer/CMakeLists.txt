@@ -12,6 +12,7 @@ endif()
 set(TARGET t2d-explorer)
 
 add_executable(${TARGET}
+    core/assets.cpp
     core/frame-buffer.cpp
     core/image.cpp
     core/shader-program.cpp
@@ -39,6 +40,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/build_timestamp-tmpl.h   ${CMAKE_RUNT
 if (EMSCRIPTEN)
     set_target_properties(${TARGET} PROPERTIES LINK_FLAGS " \
         --preload-file ${CMAKE_CURRENT_SOURCE_DIR}/../fonts@/ \
+        --preload-file ${CMAKE_CURRENT_SOURCE_DIR}/../images@/ \
         ")
 
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/index-tmpl.html          ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${TARGET}-extra/index.html @ONLY)

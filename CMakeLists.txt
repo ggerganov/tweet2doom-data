@@ -70,7 +70,7 @@ if (EMSCRIPTEN)
     ")
 
     if (T2DD_USE_LINE_SHADER)
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_CXX_FLAGS} -s USE_WEBGL2=1")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_WEBGL2=1")
     endif()
 else()
     find_package(SDL2 REQUIRED)
