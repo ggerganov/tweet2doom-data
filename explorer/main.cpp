@@ -223,7 +223,7 @@ EMSCRIPTEN_BINDINGS(tweet2doom) {
 // Core
 
 const float kSizeX0 = 1000.0f;
-const float kStepPos = 50.0f;
+const float kStepPos = 100.0f;
 const float kAnimTime = 0.25f;
 
 struct Node {
@@ -504,10 +504,15 @@ void renderMain() {
 
             const float cull = 1000.0f;
 
-            if (
-                    (p0.x < -cull || p0.x > wSize.x + cull || p0.y < -cull || p0.y > wSize.y + cull) &&
-                    (p1.x < -cull || p1.x > wSize.x + cull || p1.y < -cull || p1.y > wSize.y + cull)
-               ) continue;
+            const float pmaxx = std::max(p0.x, p1.x);
+            const float pminx = std::min(p0.x, p1.x);
+            const float pmaxy = std::max(p0.y, p1.y);
+            const float pminy = std::min(p0.y, p1.y);
+
+            if (pmaxx < -cull || pminx > wSize.x + cull ||
+                pmaxy < -cull || pminy > wSize.y + cull) {
+                continue;
+            }
 
             drawList->AddLine(p0, p1, col, thickness);
         }
@@ -953,7 +958,7 @@ void updatePre() {
 
                 const float mwheel = std::max(-5.0f, std::min(5.0f, ImGui::GetIO().MouseWheel));
 
-                if (mwheel != 0) {
+                if (mwheel != 0 && std::fabs(ImGui::GetIO().MousePos.x) < 1e6 && std::fabs(ImGui::GetIO().MousePos.y) < 1e6) {
                     vt.z += 0.3*mwheel*(1.001f - g_state.viewCur.z); newAnim = true;
 
                     const float s0 = scale;
