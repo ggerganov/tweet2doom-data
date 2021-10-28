@@ -112,7 +112,7 @@
             function checkForActions(event) {
                 setTimeout(function() { 
                     var openId = Module.get_action_open_id();
-                    if (openId.length > 0) {
+                    if (openId.length > 2) {
                         var url = 'https://twitter.com/tweet2doom/status/' + openId;
                         window.open(url, '_blank').focus();
                     }

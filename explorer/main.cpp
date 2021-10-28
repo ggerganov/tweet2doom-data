@@ -24,6 +24,7 @@
 #include <fstream>
 #include <vector>
 #include <functional>
+#include <unordered_map>
 
 #ifdef USE_LINE_SHADER
 #include "core/frame-buffer.h"
@@ -152,15 +153,17 @@ bool ImGui_SetStyle() {
     return true;
 }
 
+using NodeId = int64_t;
+
 static std::function<bool()> g_doInit;
 static std::function<void(int, int)> g_setWindowSize;
 static std::function<void(float, float, float, int)> g_setPinch;
 static std::function<bool()> g_mainUpdate;
-static std::function<void(const std::string & , const std::string & , int, int, int, int)> g_addNode;
-static std::function<void(const std::string & , int, int)> g_updateNodePosition;
-static std::function<void(const std::string & , const std::string & )> g_addEdge;
-static std::function<void(const std::string & )> g_focusNode;
-static std::function<std::string()> g_getActionOpenId;
+static std::function<void(const NodeId & , const std::string & , int, int, int, int)> g_addNode;
+static std::function<void(const NodeId & , int, int)> g_updateNodePosition;
+static std::function<void(const NodeId & , const NodeId & )> g_addEdge;
+static std::function<void(const NodeId & )> g_focusNode;
+static std::function<NodeId()> g_getActionOpenId;
 static std::function<void()> g_treeChanged;
 
 void mainUpdate(void *) {
@@ -195,27 +198,28 @@ extern "C" {
 EMSCRIPTEN_BINDINGS(tweet2doom) {
     emscripten::function("add_node", emscripten::optional_override(
                     [](const std::string & id, const std::string & username, int level, int type, int x, int y) {
-                        g_addNode(id, username, level, type, x, y);
+                        g_addNode(std::stoll(id), username, level, type, x, y);
                     }));
 
     emscripten::function("add_edge", emscripten::optional_override(
                     [](const std::string & src, const std::string & dst) {
-                        g_addEdge(src, dst);
+                        g_addEdge(std::stoll(src), std::stoll(dst));
                     }));
 
     emscripten::function("update_node_position", emscripten::optional_override(
                     [](const std::string & id, int x, int y) {
-                        g_updateNodePosition(id, x, y);
+                        g_updateNodePosition(std::stoll(id), x, y);
                     }));
 
     emscripten::function("focus_node", emscripten::optional_override(
                     [](const std::string & id) {
-                        g_focusNode(id);
+                        if (id.empty()) return;
+                        g_focusNode(std::stoll(id));
                     }));
 
     emscripten::function("get_action_open_id", emscripten::optional_override(
                     []() {
-                        return g_getActionOpenId();
+                        return std::to_string(g_getActionOpenId());
                     }));
 }
 #endif
@@ -227,7 +231,7 @@ const float kStepPos = 100.0f;
 const float kAnimTime = 0.25f;
 
 struct Node {
-    std::string id;
+    NodeId id;
     std::string username;
     int level;
     int type;
@@ -236,8 +240,8 @@ struct Node {
 };
 
 struct Edge {
-    std::string src;
-    std::string dst;
+    NodeId src;
+    NodeId dst;
 };
 
 const auto kZoomMin = 0.1f;
@@ -296,9 +300,9 @@ struct State {
 
     float aspectRatio = 1.0f;
 
-    std::string rootId;
-    std::string focusId;
-    std::string selectedId;
+    NodeId rootId;
+    NodeId focusId;
+    NodeId selectedId;
 
     int nUpdates = 2;
 
@@ -326,7 +330,7 @@ struct State {
     float renderingEdgesMinZ = 0.0f;
 
     // open action
-    std::string actionOpenId = "";
+    NodeId actionOpenId = 0;
 
     ::ImVid::Assets assets;
 
@@ -343,7 +347,7 @@ struct State {
     }
 };
 
-std::map<std::string, Node> g_nodes;
+std::unordered_map<int64_t, Node> g_nodes;
 std::vector<Edge> g_edges;
 
 State g_state;
@@ -363,7 +367,7 @@ void loadData() {
 
             if (fin.eof()) break;
 
-            g_addNode(cur.id.c_str(), cur.username.c_str(), cur.level, cur.type, 0, 0);
+            g_addNode(cur.id, cur.username.c_str(), cur.level, cur.type, 0, 0);
             ++n;
         }
         printf("Loaded %d entries from '%s'\n", n, fname.c_str());
@@ -380,7 +384,7 @@ void loadData() {
 
             if (fin.eof()) break;
 
-            g_updateNodePosition(cur.id.c_str(), cur.x, cur.y);
+            g_updateNodePosition(cur.id, cur.x, cur.y);
             ++n;
         }
         printf("Loaded %d entries from '%s'\n", n, fname.c_str());
@@ -397,7 +401,7 @@ void loadData() {
 
             if (fin.eof()) break;
 
-            g_addEdge(cur.src.c_str(), cur.dst.c_str());
+            g_addEdge(cur.src, cur.dst);
             ++n;
         }
         printf("Loaded %d entries from '%s'\n", n, fname.c_str());
@@ -563,7 +567,7 @@ void renderMain() {
         }
 
         // TODO: deduplicate
-        if (g_state.viewCur.z > 0.90 && g_state.selectedId.empty()) {
+        if (g_state.viewCur.z > 0.90 && g_state.selectedId == 0) {
             if (ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*g_state.heightControls) {
                 if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
                     if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
@@ -617,7 +621,7 @@ void renderMain() {
         const ImVec2 h1 = p1;
 
         // TODO: deduplicate
-        if (g_state.viewCur.z > 0.90 && g_state.selectedId.empty()) {
+        if (g_state.viewCur.z > 0.90 && g_state.selectedId == 0) {
             if (ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*g_state.heightControls) {
                 if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
                     if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
@@ -640,7 +644,7 @@ void renderMain() {
         if (ImGui::BeginPopup("Node")) {
 
             const auto & node = g_nodes[g_state.selectedId];
-            ImGui::Text("Node:  %s", g_state.selectedId.c_str());
+            ImGui::Text("Node:  %" PRIu64 "", g_state.selectedId);
             ImGui::Text("User:  %s", node.username.c_str());
             ImGui::Text("Pos:   %.0f %.0f", node.x, node.y);
             ImGui::Text("Type:  %s", node.type == 0 ? "ROOT" : node.type == 1 ? "Node" : "Command");
@@ -655,7 +659,7 @@ void renderMain() {
 
             ImGui::EndPopup();
         } else {
-            g_state.selectedId.clear();
+            g_state.selectedId = 0;
         }
         ImGui::PopFont();
     }
@@ -829,7 +833,7 @@ void updatePre() {
         for (auto & [id, node] : g_nodes) {
             if (node.type == 0) {
                 g_state.rootId = id;
-                printf("Root node: %s %g %g\n", id.c_str(), node.x, node.y);
+                printf("Root node: %" PRIu64 " %g %g\n", id, node.x, node.y);
             }
 
             if (node.level < 1) {
@@ -853,7 +857,7 @@ void updatePre() {
         if (g_state.sceneScale < 1.0) g_state.sceneScale = 1.0;
 
         if (g_state.isFirstChange) {
-            if (g_state.focusId.empty() || g_nodes.find(g_state.focusId) == g_nodes.end()) {
+            if (g_state.focusId == 0 || g_nodes.find(g_state.focusId) == g_nodes.end()) {
                 g_state.viewCur.x = g_nodes[g_state.rootId].x;
                 g_state.viewCur.y = g_nodes[g_state.rootId].y + 0.1f*g_state.sizey0;
                 g_state.viewCur.z = 0.999f;
@@ -1004,8 +1008,9 @@ void updatePre() {
     }
 
     const float scale = g_state.scale(g_state.viewCur.z);
-    const float iscale = (1.0/scale)/ImGui::GetIO().DisplayFramebufferScale.x;
+    [[maybe_unused]] const float iscale = (1.0/scale)/ImGui::GetIO().DisplayFramebufferScale.x;
 
+#ifdef USE_LINE_SHADER
     const float xmin = g_state.viewCur.x - 0.5*g_state.sizex0*scale;
     const float ymin = g_state.viewCur.y - 0.5*g_state.sizey0*scale;
     const float xmax = g_state.viewCur.x + 0.5*g_state.sizex0*scale;
@@ -1014,7 +1019,6 @@ void updatePre() {
     const float idx = 1.0f/(xmax - xmin);
     const float idy = 1.0f/(ymax - ymin);
 
-#ifdef USE_LINE_SHADER
     if (
             g_state.forceRender ||
             (
@@ -1089,7 +1093,7 @@ void updatePost() {
 void deinitMain() {
 }
 
-int main(int argc, char** argv) {
+int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
     printf("Build time: %s\n", BUILD_TIMESTAMP);
 #ifdef __EMSCRIPTEN__
     printf("Press the Init button to start\n");
@@ -1105,13 +1109,12 @@ int main(int argc, char** argv) {
     int windowX = 1200;
     int windowY = 800;
 
-    const char * windowTitle = "Tweet2Doom - State Tree Explorer";
-
 #ifdef __EMSCRIPTEN__
     SDL_Renderer * renderer;
     SDL_Window * window;
     SDL_CreateWindowAndRenderer(windowX, windowY, SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI | SDL_RENDERER_PRESENTVSYNC, &window, &renderer);
 #else
+    const char * windowTitle = "Tweet2Doom - State Tree Explorer";
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_Window * window = SDL_CreateWindow(windowTitle, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, windowX, windowY, window_flags);
 #endif
@@ -1250,15 +1253,15 @@ int main(int argc, char** argv) {
         return true;
     };
 
-    g_addNode = [&](const std::string & id, const std::string & username, int level, int type, int x, int y) {
+    g_addNode = [&](const NodeId & id, const std::string & username, int level, int type, int x, int y) {
         g_nodes[id] = {
             id, username, level, type, float(x), float(y),
         };
     };
 
-    g_updateNodePosition = [&](const std::string & id, int x, int y) {
+    g_updateNodePosition = [&](const NodeId & id, int x, int y) {
         if (g_nodes.find(id) == g_nodes.end()) {
-            fprintf(stderr, "Error: update position - unknown id '%s'\n", id.c_str());
+            fprintf(stderr, "Error: update position - unknown id %" PRIu64 "\n", id);
             return;
         }
 
@@ -1266,7 +1269,7 @@ int main(int argc, char** argv) {
         g_nodes[id].y = y;
     };
 
-    g_addEdge = [&](const std::string & src, const std::string & dst) {
+    g_addEdge = [&](const NodeId & src, const NodeId & dst) {
         if (g_nodes.find(src) == g_nodes.end() ||
             g_nodes.find(dst) == g_nodes.end()) {
             // most likely a hidden node
@@ -1277,14 +1280,14 @@ int main(int argc, char** argv) {
         g_edges.push_back({ src, dst, });
     };
 
-    g_focusNode = [&](const std::string & id) {
-        if (id.empty()) return;
+    g_focusNode = [&](const NodeId & id) {
+        if (id == 0) return;
         g_state.focusId = id;
     };
 
     g_getActionOpenId = [&]() {
         auto res = g_state.actionOpenId;
-        g_state.actionOpenId.clear();
+        g_state.actionOpenId = 0;
         return res;
     };
 
