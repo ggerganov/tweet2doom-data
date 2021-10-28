@@ -16,5 +16,6 @@ rsync -rtvum \
 rsync -rtvum \
     --include='*depth' \
     --include='*frames' \
+    --include='*parent_id' \
     --include='*history.txt' \
     --include='*/' --exclude='*' $src/nodes/ $dst/data/nodes/
