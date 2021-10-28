@@ -4,10 +4,9 @@ wd=$(dirname $0)
 cd $wd
 wd=$(pwd)
 
-nplays=5
 nseconds=20
 nrecord=$((35*$nseconds))
-nfreeze=$(($nseconds))
+nfreeze=$((35*10))
 
 dir_doomreplay="$wd/doomreplay"
 dir_tweet2doom="$wd/tweet2doom"
@@ -23,7 +22,7 @@ for i in $nodes_all ; do
     if [ $depth -lt 3 ] ; then
         continue
     fi
-    if [ $frames -lt $((nrecord + 1)) ] ; then
+    if [ $frames -lt $((nrecord + 350)) ] ; then
         continue
     fi
     nodes="$nodes $i"
@@ -32,7 +31,15 @@ done
 
 echo "Total nodes: $num_nodes"
 
-nodes_render=$(echo "$nodes" | tr " " "\n" | sort -R | tail -n $nplays)
+id_selected=$(echo "$nodes" | tr " " "\n" | sort -R | tail -n 1)
+id_parent=$(cat $id_selected/parent_id)
+id_render=$(cat ../processed/$id_parent/parent_id)
+
+frames_suggested=$(cat ../processed/$id_parent/frames_cur)
+
+echo "Selected Id: $id_selected"
+echo "Parent Id:   $id_parent"
+echo "Render Id:   $id_render"
 
 cd ../../../
 
@@ -42,13 +49,13 @@ mkdir -p tmp
 rm -rf .savegame
 ln -sf $dir_doomreplay/.savegame .savegame
 
-for i in $nodes_render ; do
+for i in $id_render ; do
     $dir_doomreplay/doomgeneric \
         -iwad $dir_doomreplay/doom1.wad \
         -input public/data/nodes/$i/history.txt \
         -output tmp/$i.mp4 \
         -nrecord $nrecord \
-        -framerate 60 \
+        -framerate 35 \
         -nfreeze $nfreeze \
         -render_frame \
         -render_input \
@@ -56,6 +63,8 @@ for i in $nodes_render ; do
 
     $dir_tweet2doom/parse-history public/data/nodes/$i/history.txt $nrecord 35 tmp/command_$i 0 1 > /dev/null
 done
+
+$dir_tweet2doom/parse-history public/data/nodes/$id_selected/history.txt $frames_suggested 1000 tmp/command_suggested 50 0 > /dev/null
 
 j=0
 cd tmp
@@ -65,11 +74,13 @@ for i in `ls *.mp4 | sort -R` ; do
    j=$(($j + 1))
    id=$(echo ${i%.*})
 
+   echo "$id" > id
+
    for k in `seq 0 $((nseconds - 1))` ; do
        idx=$(( ($j - 1)*$nseconds + k ))
 
-       ts_m=$(( 600*($idx    ) ))
-       te_m=$(( 600*($idx + 1) ))
+       ts_m=$(( 1000*($idx    ) ))
+       te_m=$(( 1000*($idx + 1) ))
 
        ts_s=$(printf "%02d" $(( $ts_m/1000 )) )
        ts_m=$(printf "%03d" $(( $ts_m - ($ts_m/1000)*1000 )) )
@@ -85,4 +96,9 @@ for i in `ls *.mp4 | sort -R` ; do
    done
 done
 
-ffmpeg -f concat -safe 0 -i list -c copy highlights.mp4
+echo "$(( $idx + 2 ))" >> subs.srt
+echo "00:00:20,500 --> 00:00:30,000" >> subs.srt
+echo "Continue the game from here by replying to the quoted tweet below." >> subs.srt
+echo "Let's play!" >> subs.srt
+
+ffmpeg -f concat -safe 0 -i list -c copy lets-play.mp4
