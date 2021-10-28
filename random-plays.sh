@@ -4,6 +4,11 @@ wd=$(dirname $0)
 cd $wd
 wd=$(pwd)
 
+nplays=5
+nseconds=20
+nrecord=$((35*$nseconds))
+nfreeze=$(($nseconds))
+
 dir_doomreplay="$wd/doomreplay"
 dir_tweet2doom="$wd/tweet2doom"
 
@@ -18,7 +23,7 @@ for i in $nodes_all ; do
     if [ $depth -lt 3 ] ; then
         continue
     fi
-    if [ $frames -lt 1050 ] ; then
+    if [ $frames -lt $((nrecord + 1)) ] ; then
         continue
     fi
     nodes="$nodes $i"
@@ -27,7 +32,7 @@ done
 
 echo "Total nodes: $num_nodes"
 
-nodes_render=$(echo "$nodes" | tr " " "\n" | sort -R | tail -n 10)
+nodes_render=$(echo "$nodes" | tr " " "\n" | sort -R | tail -n $nplays)
 
 cd ../../../
 
@@ -42,14 +47,14 @@ for i in $nodes_render ; do
         -iwad $dir_doomreplay/doom1.wad \
         -input public/data/nodes/$i/history.txt \
         -output tmp/$i.mp4 \
-        -nrecord 350 \
+        -nrecord $nrecord \
         -framerate 60 \
-        -nfreeze 10 \
+        -nfreeze $nfreeze \
         -render_frame \
         -render_input \
         -render_username || result=$?
 
-    $dir_tweet2doom/parse-history public/data/nodes/$i/history.txt 350 35 tmp/command_$i > /dev/null
+    $dir_tweet2doom/parse-history public/data/nodes/$i/history.txt $nrecord 35 tmp/command_$i > /dev/null
 done
 
 j=0
@@ -60,8 +65,8 @@ for i in `ls *.mp4 | sort -R` ; do
    j=$(($j + 1))
    id=$(echo ${i%.*})
 
-   for k in `seq 0 9` ; do
-       idx=$(( ($j - 1)*10 + k ))
+   for k in `seq 0 $((nseconds - 1))` ; do
+       idx=$(( ($j - 1)*$nseconds + k ))
 
        ts_m=$(( 600*($idx    ) ))
        te_m=$(( 600*($idx + 1) ))
