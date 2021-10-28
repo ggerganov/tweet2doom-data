@@ -83,14 +83,6 @@ for i in `ls *.mp4 | sort -R` ; do
        echo "$cmd" >> subs.srt
        echo "" >> subs.srt
    done
-
-   #ts=$(printf "%02d" $((($j - 1)*6)))
-   #te=$(printf "%02d" $((($j    )*6)))
-   #read -r cmd < command_$id
-   #echo "$j" >> subs.srt
-   #echo "00:00:$ts,000 --> 00:00:$te,000" >> subs.srt
-   #echo "Play $j: $cmd" >> subs.srt
-   #echo "" >> subs.srt
 done
 
 ffmpeg -f concat -safe 0 -i list -c copy highlights.mp4
