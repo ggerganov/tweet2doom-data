@@ -4,17 +4,15 @@
 
 #include "core/assets.h"
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#include <emscripten/bind.h>
-#else
-#define EMSCRIPTEN_KEEPALIVE
-#endif
-
 #include "imgui-extra/imgui_impl.h"
 
 #ifndef ICON_FA_COGS
 #include "icons_font_awesome.h"
+#endif
+
+#ifdef USE_LINE_SHADER
+#include "core/frame-buffer.h"
+#include "core/shader-program.h"
 #endif
 
 #include <SDL.h>
@@ -26,131 +24,20 @@
 #include <functional>
 #include <unordered_map>
 
-#ifdef USE_LINE_SHADER
-#include "core/frame-buffer.h"
-#include "core/shader-program.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/bind.h>
+#else
+#define EMSCRIPTEN_KEEPALIVE
 #endif
+
+#include "imgui_helpers.h"
 
 const float kFontScale = 2.0f;
 
 namespace {
 template <typename T>
 int sgn(T x) { return x < 0 ? -1 : x > 0 ? 1 : 0; }
-}
-
-// ImGui helpers
-
-bool ImGui_tryLoadFont(const std::string & filename, float size = 14.0f, bool merge = false) {
-    printf("Trying to load font from '%s' ..\n", filename.c_str());
-    std::ifstream f(filename);
-    if (f.good() == false) {
-        printf(" - failed\n");
-        return false;
-    }
-    printf(" - success\n");
-    if (merge) {
-        // todo : ugly static !!!
-        static ImWchar ranges[] = { 0xf000, 0xf3ff, 0 };
-        static ImFontConfig config;
-
-        config.MergeMode = true;
-        config.GlyphOffset = { 0.0f, 0.0f };
-
-        ImGui::GetIO().Fonts->AddFontFromFileTTF(filename.c_str(), size, &config, ranges);
-    } else {
-        ImGui::GetIO().Fonts->AddFontFromFileTTF(filename.c_str(), size);
-    }
-    return true;
-}
-
-bool ImGui_BeginFrame(SDL_Window * window) {
-    ImGui_NewFrame(window);
-
-    return true;
-}
-
-bool ImGui_EndFrame(SDL_Window * window) {
-    // Rendering
-    int display_w, display_h;
-    SDL_GetWindowSize(window, &display_w, &display_h);
-    glViewport(0, 0, display_w, display_h);
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    ImGui::Render();
-    ImGui_RenderDrawData(ImGui::GetDrawData());
-
-    SDL_GL_SwapWindow(window);
-
-    return true;
-}
-
-bool ImGui_SetStyle() {
-    ImGuiStyle & style = ImGui::GetStyle();
-
-    style.AntiAliasedFill = true;
-    style.AntiAliasedLines = true;
-    style.WindowRounding = 0.0f;
-
-    style.WindowPadding = ImVec2(8, 8);
-    style.WindowRounding = 0.0f;
-    style.FramePadding = ImVec2(4, 3);
-    style.FrameRounding = 0.0f;
-    style.ItemSpacing = ImVec2(8, 4);
-    style.ItemInnerSpacing = ImVec2(4, 4);
-    style.IndentSpacing = 21.0f;
-    style.ScrollbarSize = 16.0f;
-    style.ScrollbarRounding = 9.0f;
-    style.GrabMinSize = 10.0f;
-    style.GrabRounding = 3.0f;
-
-    style.Colors[ImGuiCol_Text]                  = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-    style.Colors[ImGuiCol_TextDisabled]          = ImVec4(0.24f, 0.41f, 0.41f, 1.00f);
-    style.Colors[ImGuiCol_WindowBg]              = ImVec4(0.11f, 0.15f, 0.20f, 0.60f);
-    //style.Colors[ImGuiCol_ChildWindowBg]         = ImVec4(0.07f, 0.07f, 0.09f, 1.00f);
-    style.Colors[ImGuiCol_PopupBg]               = ImVec4(0.07f, 0.07f, 0.09f, 1.00f);
-    style.Colors[ImGuiCol_Border]                = ImVec4(0.31f, 0.31f, 0.31f, 0.71f);
-    style.Colors[ImGuiCol_BorderShadow]          = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    style.Colors[ImGuiCol_FrameBg]               = ImVec4(0.00f, 0.39f, 0.39f, 0.39f);
-    style.Colors[ImGuiCol_FrameBgHovered]        = ImVec4(0.26f, 1.00f, 1.00f, 0.39f);
-    style.Colors[ImGuiCol_FrameBgActive]         = ImVec4(0.00f, 0.78f, 0.00f, 1.00f);
-    style.Colors[ImGuiCol_TitleBg]               = ImVec4(0.00f, 0.50f, 0.50f, 0.70f);
-    style.Colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.00f, 0.50f, 0.50f, 1.00f);
-    style.Colors[ImGuiCol_TitleBgActive]         = ImVec4(0.00f, 0.70f, 0.70f, 1.00f);
-    style.Colors[ImGuiCol_MenuBarBg]             = ImVec4(0.00f, 0.70f, 0.70f, 1.00f);
-    style.Colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.10f, 0.27f, 0.27f, 1.00f);
-    style.Colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.80f, 0.80f, 0.83f, 0.31f);
-    style.Colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.26f, 1.00f, 1.00f, 0.39f);
-    style.Colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.00f, 0.78f, 0.00f, 1.00f);
-    //style.Colors[ImGuiCol_ComboBg]               = ImVec4(0.00f, 0.39f, 0.39f, 1.00f);
-    style.Colors[ImGuiCol_CheckMark]             = ImVec4(0.80f, 0.80f, 0.83f, 0.39f);
-    style.Colors[ImGuiCol_SliderGrab]            = ImVec4(0.80f, 0.80f, 0.83f, 0.39f);
-    style.Colors[ImGuiCol_SliderGrabActive]      = ImVec4(0.00f, 0.78f, 0.00f, 1.00f);
-    style.Colors[ImGuiCol_Button]                = ImVec4(0.13f, 0.55f, 0.55f, 1.00f);
-    style.Colors[ImGuiCol_ButtonHovered]         = ImVec4(0.61f, 1.00f, 0.00f, 0.51f);
-    style.Colors[ImGuiCol_ButtonActive]          = ImVec4(0.00f, 0.78f, 0.00f, 1.00f);
-    style.Colors[ImGuiCol_Header]                = ImVec4(0.79f, 0.51f, 0.00f, 0.51f);
-    style.Colors[ImGuiCol_HeaderHovered]         = ImVec4(0.79f, 0.51f, 0.00f, 0.67f);
-    style.Colors[ImGuiCol_HeaderActive]          = ImVec4(0.79f, 0.51f, 0.00f, 0.67f);
-    //style.Colors[ImGuiCol_Column]                = ImVec4(0.79f, 0.51f, 0.00f, 0.67f);
-    //style.Colors[ImGuiCol_ColumnHovered]         = ImVec4(0.25f, 1.00f, 0.00f, 1.00f);
-    //style.Colors[ImGuiCol_ColumnActive]          = ImVec4(0.79f, 0.51f, 0.00f, 0.67f);
-    style.Colors[ImGuiCol_ResizeGrip]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    style.Colors[ImGuiCol_ResizeGripHovered]     = ImVec4(0.26f, 1.00f, 1.00f, 0.39f);
-    style.Colors[ImGuiCol_ResizeGripActive]      = ImVec4(0.00f, 0.78f, 0.00f, 1.00f);
-    //style.Colors[ImGuiCol_CloseButton]           = ImVec4(0.40f, 0.39f, 0.38f, 0.16f);
-    //style.Colors[ImGuiCol_CloseButtonHovered]    = ImVec4(0.26f, 1.00f, 1.00f, 0.39f);
-    //style.Colors[ImGuiCol_CloseButtonActive]     = ImVec4(0.79f, 0.51f, 0.00f, 0.67f);
-    style.Colors[ImGuiCol_PlotLines]             = ImVec4(1.00f, 0.65f, 0.38f, 0.67f);
-    style.Colors[ImGuiCol_PlotLinesHovered]      = ImVec4(0.25f, 1.00f, 0.00f, 1.00f);
-    style.Colors[ImGuiCol_PlotHistogram]         = ImVec4(1.00f, 0.65f, 0.38f, 0.67f);
-    style.Colors[ImGuiCol_PlotHistogramHovered]  = ImVec4(0.25f, 1.00f, 0.00f, 1.00f);
-    style.Colors[ImGuiCol_TextSelectedBg]        = ImVec4(0.25f, 1.00f, 0.00f, 0.43f);
-    //style.Colors[ImGuiCol_ModalWindowDarkening]  = ImVec4(1.00f, 0.98f, 0.95f, 0.78f);
-
-    style.ScaleAllSizes(1.0f);
-
-    return true;
 }
 
 using NodeId = int64_t;
@@ -163,7 +50,7 @@ static std::function<void(const NodeId & , const std::string & , int, int, int, 
 static std::function<void(const NodeId & , int, int)> g_updateNodePosition;
 static std::function<void(const NodeId & , const NodeId & )> g_addEdge;
 static std::function<void(const NodeId & )> g_focusNode;
-static std::function<NodeId()> g_getActionOpenId;
+static std::function<std::string()> g_getActionOpenUrl;
 static std::function<void()> g_treeChanged;
 
 void mainUpdate(void *) {
@@ -217,9 +104,9 @@ EMSCRIPTEN_BINDINGS(tweet2doom) {
                         g_focusNode(std::stoll(id));
                     }));
 
-    emscripten::function("get_action_open_id", emscripten::optional_override(
+    emscripten::function("get_action_open_url", emscripten::optional_override(
                     []() {
-                        return std::to_string(g_getActionOpenId());
+                        return g_getActionOpenUrl();
                     }));
 }
 #endif
@@ -229,6 +116,7 @@ EMSCRIPTEN_BINDINGS(tweet2doom) {
 const float kSizeX0 = 1000.0f;
 const float kStepPos = 100.0f;
 const float kAnimTime = 0.25f;
+const float kWindowFadeTime = 0.25f;
 
 struct Node {
     NodeId id;
@@ -267,6 +155,13 @@ struct Animation {
     View v1;
 
     int type;
+};
+
+enum class EWindowKind {
+    None,
+    Help,
+    Statistics,
+    Achievements,
 };
 
 struct State {
@@ -315,7 +210,7 @@ struct State {
     bool isMouseDown = false;
     bool isPinching = false;
     bool isPanning = false;
-    bool forceRender = false;
+    bool isPopupOpen = true;
 
     float mouseDownX = 0.0f;
     float mouseDownY = 0.0f;
@@ -324,13 +219,20 @@ struct State {
 
     float heightControls = 0.0f;
 
+    // rendering
+    bool forceRender = false;
     int nSkipUpdate = 0;
+
+    // windows
+    bool windowShow = false;
+    float windowShowT0 = 0.0f;
+    EWindowKind windowKind = EWindowKind::None;
 
     // rendering options
     float renderingEdgesMinZ = 0.0f;
 
     // open action
-    NodeId actionOpenId = 0;
+    std::string actionOpenUrl = "";
 
     ::ImVid::Assets assets;
 
@@ -344,6 +246,11 @@ struct State {
         sceneScale = std::max(
                 1.1*(((xmax - xmin) / sizex0 - 1.0) / 0.9),
                 1.1*(((ymax - ymin) / sizey0 - 1.0) / 0.9));
+    }
+
+    bool isMouseInMainCanvas() const {
+        return (ImGui::GetIO().MousePos.y > 0.625f*heightControls &&
+                ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*heightControls);
     }
 };
 
@@ -566,15 +473,11 @@ void renderMain() {
             }
         }
 
-        // TODO: deduplicate
         if (g_state.viewCur.z > 0.90 && g_state.selectedId == 0) {
-            if (ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*g_state.heightControls) {
+            if (g_state.isMouseInMainCanvas()) {
                 if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
                     if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
-                        auto pm = ImGui::GetMousePos();
-                        pm.x = h1.x;
-                        pm.y = h0.y;
-                        ImGui::SetNextWindowPos(pm);
+                        ImGui::SetNextWindowPos({ h1.x, h0.y });
 
                         ImGui::OpenPopup("Node");
                         g_state.selectedId = id;
@@ -603,9 +506,9 @@ void renderMain() {
 
         const ImVec2 tSize = ImGui::CalcTextSize(node.username.c_str());
         const ImVec2 tMargin = { 12.0f*iscale, 8.0f*iscale, };
-        const ImVec2 pt = {pos.x - 0.5f*tSize.x, pos.y - 0.5f*tSize.y, };
-        const ImVec2 p0 = {pos.x - 0.5f*tSize.x - tMargin.x, pos.y - 0.5f*tSize.y - tMargin.y, };
-        const ImVec2 p1 = {pos.x + 0.5f*tSize.x + tMargin.x, pos.y + 0.5f*tSize.y + tMargin.y, };
+        const ImVec2 pt = { pos.x - 0.5f*tSize.x, pos.y - 0.5f*tSize.y, };
+        const ImVec2 p0 = { pos.x - 0.5f*tSize.x - tMargin.x, pos.y - 0.5f*tSize.y - tMargin.y, };
+        const ImVec2 p1 = { pos.x + 0.5f*tSize.x + tMargin.x, pos.y + 0.5f*tSize.y + tMargin.y, };
 
         if (g_state.viewCur.z > 0.98) {
             drawList->AddRectFilled(p0, p1, col, 8.0);
@@ -617,18 +520,11 @@ void renderMain() {
             drawList->AddRectFilled(p0, p1, col);
         }
 
-        const ImVec2 h0 = p0;
-        const ImVec2 h1 = p1;
-
-        // TODO: deduplicate
         if (g_state.viewCur.z > 0.90 && g_state.selectedId == 0) {
-            if (ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*g_state.heightControls) {
-                if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
+            if (g_state.isMouseInMainCanvas()) {
+                if (ImGui::IsMouseHoveringRect(p0, p1, true)) {
                     if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
-                        auto pm = ImGui::GetMousePos();
-                        pm.x = h1.x;
-                        pm.y = h0.y;
-                        ImGui::SetNextWindowPos(pm);
+                        ImGui::SetNextWindowPos({ p1.x, p0.y });
 
                         ImGui::OpenPopup("Node");
                         g_state.selectedId = id;
@@ -642,39 +538,84 @@ void renderMain() {
         ImGui::PushFont(ImGui::GetIO().Fonts->Fonts.back());
         ImGui::SetWindowFontScale(1.0f/kFontScale);
         if (ImGui::BeginPopup("Node")) {
+            g_state.isPopupOpen = true;
 
             const auto & node = g_nodes[g_state.selectedId];
-            ImGui::Text("Node:  %" PRIu64 "", g_state.selectedId);
-            ImGui::Text("User:  %s", node.username.c_str());
-            ImGui::Text("Pos:   %.0f %.0f", node.x, node.y);
-            ImGui::Text("Type:  %s", node.type == 0 ? "ROOT" : node.type == 1 ? "Node" : "Command");
-            ImGui::Text("Depth: %d", node.level);
+            ImGui::Text("Node:   %" PRIu64 "", g_state.selectedId);
+            ImGui::Text("Player: %s", node.username.c_str());
+            ImGui::Text("Pos:    %.0f %.0f", node.x, node.y);
+            ImGui::Text("Type:   %s", node.type == 0 ? "ROOT" : node.type == 1 ? "Node" : "Command");
+            ImGui::Text("Depth:  %d", node.level);
 
             ImGui::Separator();
 
             if (ImGui::Button("Twitter")) {
-                g_state.actionOpenId = g_state.selectedId;
+                g_state.actionOpenUrl = "https://twitter.com/tweet2doom/status/" + std::to_string(g_state.selectedId);
                 ImGui::CloseCurrentPopup();
             }
 
             ImGui::EndPopup();
         } else {
+            g_state.isPopupOpen = false;
             g_state.selectedId = 0;
         }
         ImGui::PopFont();
     }
 
+    // render controls
     {
         ImGui::SetWindowFontScale(1.0f/kFontScale);
 
-        const float kButtonSize = 1.5f*ImGui::GetTextLineHeightWithSpacing();
-        const ImVec2 offset = { 2.0f*style.ItemInnerSpacing.x, 2.0f*style.ItemInnerSpacing.y, };
+        const float kGridSize = 1.5f*ImGui::GetTextLineHeightWithSpacing();
+        const ImVec2 kGridOffset = { 2.0f*style.ItemInnerSpacing.x, 2.0f*style.ItemInnerSpacing.y, };
+
+        // help
+        {
+            ImGui::SetCursorScreenPos({ kGridOffset.x + 0.0f*(kGridSize + kGridOffset.x), 1.0f*(kGridSize + kGridOffset.y) - kGridSize, });
+
+            if (ImGui::Button(ICON_FA_QUESTION, ImVec2 { kGridSize, kGridSize })) {
+                ImGui::SetNextWindowPos({ kGridOffset.x + 0.0f*(kGridSize + kGridOffset.x), 2.0f*(kGridSize + kGridOffset.y) - kGridSize, });
+                ImGui::SetNextWindowFocus();
+                g_state.windowShow = true;
+                g_state.windowShowT0 = T;
+                g_state.windowKind = EWindowKind::Help;
+                g_state.nUpdates = kWindowFadeTime/0.016f + 1.0f;
+            }
+        }
+
+        // statistics
+        {
+            ImGui::SetCursorScreenPos({ kGridOffset.x + 1.0f*(kGridSize + kGridOffset.x), 1.0f*(kGridSize + kGridOffset.y) - kGridSize, });
+
+            if (ImGui::Button(ICON_FA_CHART_PIE, ImVec2 { kGridSize, kGridSize })) {
+                ImGui::SetNextWindowPos({ kGridOffset.x + 0.0f*(kGridSize + kGridOffset.x), 2.0f*(kGridSize + kGridOffset.y) - kGridSize, });
+                ImGui::SetNextWindowFocus();
+                g_state.windowShow = true;
+                g_state.windowShowT0 = T;
+                g_state.windowKind = EWindowKind::Statistics;
+                g_state.nUpdates = kWindowFadeTime/0.016f + 1.0f;
+            }
+        }
+
+        // achievements
+        {
+            ImGui::SetCursorScreenPos({ kGridOffset.x + 2.0f*(kGridSize + kGridOffset.x), 1.0f*(kGridSize + kGridOffset.y) - kGridSize, });
+
+            if (ImGui::Button(ICON_FA_TROPHY, ImVec2 { kGridSize, kGridSize })) {
+                ImGui::SetNextWindowPos({ kGridOffset.x + 0.0f*(kGridSize + kGridOffset.x), 2.0f*(kGridSize + kGridOffset.y) - kGridSize, });
+                ImGui::SetNextWindowFocus();
+                g_state.windowShow = true;
+                g_state.windowShowT0 = T;
+                g_state.windowKind = EWindowKind::Achievements;
+                g_state.nUpdates = kWindowFadeTime/0.016f + 1.0f;
+            }
+        }
 
         // fit scene
         {
-            ImGui::SetCursorScreenPos({ wSize.x - 1.0f*(kButtonSize + offset.x), wSize.y - 2.0f*(kButtonSize + offset.y), });
+            ImGui::SetCursorScreenPos({ wSize.x - 1.0f*(kGridSize + kGridOffset.x), wSize.y - 2.0f*(kGridSize + kGridOffset.y), });
 
-            if (ImGui::Button(ICON_FA_EXPAND, ImVec2 { kButtonSize, kButtonSize })) {
+            if (ImGui::Button(ICON_FA_EXPAND, ImVec2 { kGridSize, kGridSize })) {
                 g_state.anim.t0 = T;
                 g_state.anim.t1 = T + 3.0f;
                 g_state.anim.v0 = g_state.viewCur;
@@ -687,9 +628,9 @@ void renderMain() {
 
         // zoom out
         {
-            ImGui::SetCursorScreenPos({ wSize.x - 2.0f*(kButtonSize + offset.x), wSize.y - 1.0f*(kButtonSize + offset.y), });
+            ImGui::SetCursorScreenPos({ wSize.x - 2.0f*(kGridSize + kGridOffset.x), wSize.y - 1.0f*(kGridSize + kGridOffset.y), });
 
-            if (ImGui::Button(ICON_FA_SEARCH_MINUS, ImVec2 { kButtonSize, kButtonSize })) {
+            if (ImGui::Button(ICON_FA_SEARCH_MINUS, ImVec2 { kGridSize, kGridSize })) {
             }
             if (ImGui::IsMouseDown(0) && ImGui::IsItemHovered()) {
                 g_state.anim.t0 = T - 0.016f;
@@ -702,9 +643,9 @@ void renderMain() {
 
         // zoom in
         {
-            ImGui::SetCursorScreenPos({ wSize.x - 1.0f*(kButtonSize + offset.x), wSize.y - 1.0f*(kButtonSize + offset.y), });
+            ImGui::SetCursorScreenPos({ wSize.x - 1.0f*(kGridSize + kGridOffset.x), wSize.y - 1.0f*(kGridSize + kGridOffset.y), });
 
-            if (ImGui::Button(ICON_FA_SEARCH_PLUS, ImVec2 { kButtonSize, kButtonSize })) {
+            if (ImGui::Button(ICON_FA_SEARCH_PLUS, ImVec2 { kGridSize, kGridSize })) {
             }
             if (ImGui::IsMouseDown(0) && ImGui::IsItemHovered()) {
                 g_state.anim.t0 = T - 0.016f;
@@ -717,9 +658,9 @@ void renderMain() {
 
         // left
         {
-            ImGui::SetCursorScreenPos({ offset.x + 0.0f*(kButtonSize + offset.x), wSize.y - 1.0f*(kButtonSize + offset.y), });
+            ImGui::SetCursorScreenPos({ kGridOffset.x + 0.0f*(kGridSize + kGridOffset.x), wSize.y - 1.0f*(kGridSize + kGridOffset.y), });
 
-            if (ImGui::Button(ICON_FA_ARROW_LEFT, ImVec2 { kButtonSize, kButtonSize })) {
+            if (ImGui::Button(ICON_FA_ARROW_LEFT, ImVec2 { kGridSize, kGridSize })) {
             }
             if (ImGui::IsMouseDown(0) && ImGui::IsItemHovered()) {
                 g_state.anim.t0 = T - 0.016f;
@@ -732,9 +673,9 @@ void renderMain() {
 
         // right
         {
-            ImGui::SetCursorScreenPos({ offset.x + 2.0f*(kButtonSize + offset.x), wSize.y - 1.0f*(kButtonSize + offset.y), });
+            ImGui::SetCursorScreenPos({ kGridOffset.x + 2.0f*(kGridSize + kGridOffset.x), wSize.y - 1.0f*(kGridSize + kGridOffset.y), });
 
-            if (ImGui::Button(ICON_FA_ARROW_RIGHT, ImVec2 { kButtonSize, kButtonSize })) {
+            if (ImGui::Button(ICON_FA_ARROW_RIGHT, ImVec2 { kGridSize, kGridSize })) {
             }
             if (ImGui::IsMouseDown(0) && ImGui::IsItemHovered()) {
                 g_state.anim.t0 = T - 0.016f;
@@ -747,9 +688,9 @@ void renderMain() {
 
         // up
         {
-            ImGui::SetCursorScreenPos({ offset.x + 1.0f*(kButtonSize + offset.x), wSize.y - 2.0f*(kButtonSize + offset.y), });
+            ImGui::SetCursorScreenPos({ kGridOffset.x + 1.0f*(kGridSize + kGridOffset.x), wSize.y - 2.0f*(kGridSize + kGridOffset.y), });
 
-            if (ImGui::Button(ICON_FA_ARROW_UP, ImVec2 { kButtonSize, kButtonSize })) {
+            if (ImGui::Button(ICON_FA_ARROW_UP, ImVec2 { kGridSize, kGridSize })) {
             }
             if (ImGui::IsMouseDown(0) && ImGui::IsItemHovered()) {
                 g_state.anim.t0 = T - 0.016f;
@@ -762,9 +703,9 @@ void renderMain() {
 
         // down
         {
-            ImGui::SetCursorScreenPos({ offset.x + 1.0f*(kButtonSize + offset.x), wSize.y - 1.0f*(kButtonSize + offset.y), });
+            ImGui::SetCursorScreenPos({ kGridOffset.x + 1.0f*(kGridSize + kGridOffset.x), wSize.y - 1.0f*(kGridSize + kGridOffset.y), });
 
-            if (ImGui::Button(ICON_FA_ARROW_DOWN, ImVec2 { kButtonSize, kButtonSize })) {
+            if (ImGui::Button(ICON_FA_ARROW_DOWN, ImVec2 { kGridSize, kGridSize })) {
             }
             if (ImGui::IsMouseDown(0) && ImGui::IsItemHovered()) {
                 g_state.anim.t0 = T - 0.016f;
@@ -775,24 +716,119 @@ void renderMain() {
             }
         }
 
-        g_state.heightControls = 2.0f*(kButtonSize + offset.y);
+        g_state.heightControls = 2.0f*(kGridSize + kGridOffset.y);
     }
 
-    ImGui::SetWindowFontScale(1.0f/kFontScale);
-
-    ImGui::SetCursorScreenPos({ 0.0f, 0.0f, });
-    ImGui::Text("%g", g_state.viewCur.z);
-    //ImGui::Text("%g", ImGui::GetIO().Framerate);
-    //ImGui::Text("%g %g", ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-    //ImGui::Text("%g %g", ImGui::GetIO().DisplayFramebufferScale.x, ImGui::GetIO().DisplayFramebufferScale.y);
-    //ImGui::Text("%g, %g", g_state.pinchScale, g_state.viewCur.z);
-    //ImGui::Text("v0:  %g, %g, %g, %g", g_state.anim.v0.x, g_state.anim.v0.y, g_state.anim.v0.z, g_state.anim.t0);
-    //ImGui::Text("v1:  %g, %g, %g, %g", g_state.anim.v1.x, g_state.anim.v1.y, g_state.anim.v1.z, g_state.anim.t1);
-    //ImGui::Text("cur: %g, %g, %g, %g", g_state.viewCur.x, g_state.viewCur.y, g_state.viewCur.z, ImGui::GetTime());
 
     //if (ImGui::IsMouseHoveringRect({ 0.0f, 0.0f }, wSize)) {
     //    m_state.mousePos.from(ImGui::GetIO().MousePos);
     //}
+
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts.back());
+
+    // window : Help
+    if (g_state.windowShow && g_state.windowKind == EWindowKind::Help) {
+        const float kIconSize = ImGui::GetTextLineHeightWithSpacing();
+
+        ImGui::Begin("What is this?", nullptr,
+                     ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoResize |
+                     ImGuiWindowFlags_NoCollapse |
+                     ImGuiWindowFlags_NoScrollbar |
+                     ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::GetStyle().Alpha = std::min(1.0f, (T - g_state.windowShowT0)/kWindowFadeTime);
+        ImGui::SetWindowFontScale(1.0f/kFontScale);
+        ImGui::PushTextWrapPos(std::min(0.65f*ImGui::GetIO().DisplaySize.x, 400.0f));
+        ImGui::Text("This is the State Tree Explorer of the @tweet2doom Twitter bot. "
+                    "The tree contains all commands ever tweeted to the bot and the resulting game states (i.e. nodes). "
+                    "\n\n");
+
+        {
+            const auto pos = ImGui::GetCursorScreenPos();
+            const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 1.0f });
+
+            ImGui::GetWindowDrawList()->AddRectFilled(pos, { pos.x + kIconSize, pos.y + kIconSize }, col, 4.0f);
+            ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { kIconSize, kIconSize, }, {}, {}, {}, {});
+            //ImGui::SetCursorScreenPos({ pos.x + kIconSize, pos.y });
+            ImGui::SameLine();
+            ImGui::Text("- Command");
+        }
+
+        {
+            ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { kIconSize, kIconSize, });
+            ImGui::SameLine();
+            ImGui::Text("- Node");
+        }
+
+        ImGui::Text("\n");
+        ImGui::Separator();
+        ImGui::Text("For more information:\n\n");
+        if (ImGui::Button("https://twitter.com/tweet2doom")) {
+            g_state.actionOpenUrl = "https://twitter.com/tweet2doom/status/1444355917160534024";
+        }
+        if (ImGui::IsWindowFocused() == false) {
+            g_state.windowShow = false;
+            g_state.windowKind = EWindowKind::None;
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::End();
+    }
+
+    // window : Statistics
+    if (g_state.windowShow && g_state.windowKind == EWindowKind::Statistics) {
+        ImGui::Begin("Statistics", nullptr,
+                     ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoResize |
+                     ImGuiWindowFlags_NoCollapse |
+                     ImGuiWindowFlags_NoScrollbar |
+                     ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::GetStyle().Alpha = std::min(1.0f, (T - g_state.windowShowT0)/kWindowFadeTime);
+        ImGui::SetWindowFontScale(1.0f/kFontScale);
+        ImGui::PushTextWrapPos(std::min(0.65f*ImGui::GetIO().DisplaySize.x, 400.0f));
+
+        ImGui::Text("Total nodes: %d\n", (int) g_nodes.size());
+        ImGui::Separator();
+        ImGui::Text("Debug information:");
+        ImGui::Text("Zoom:      %.5f", g_state.viewCur.z);
+        ImGui::Text("Mouse:     %.0f, %0.f", ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y);
+        ImGui::Text("Framerate: %.2f (%d)", ImGui::GetIO().Framerate, g_state.nUpdates);
+        ImGui::Text("Display:   %.0f %.0f", ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
+        ImGui::Text("v0:        %.3f, %.3f, %.3f, %.3f,", g_state.anim.v0.x, g_state.anim.v0.y, g_state.anim.v0.z, g_state.anim.t0);
+        ImGui::Text("v1:        %.3f, %.3f, %.3f, %.3f,", g_state.anim.v1.x, g_state.anim.v1.y, g_state.anim.v1.z, g_state.anim.t1);
+        ImGui::Text("cur:       %.3f, %.3f, %.3f, %.3f,", g_state.viewCur.x, g_state.viewCur.y, g_state.viewCur.z, ImGui::GetTime());
+
+        if (ImGui::IsWindowFocused() == false) {
+            g_state.windowShow = false;
+            g_state.windowKind = EWindowKind::None;
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::End();
+    }
+
+    // window : Achievements
+    if (g_state.windowShow && g_state.windowKind == EWindowKind::Achievements) {
+        ImGui::Begin("Achievements", nullptr,
+                     ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoResize |
+                     ImGuiWindowFlags_NoCollapse |
+                     ImGuiWindowFlags_NoScrollbar |
+                     ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::GetStyle().Alpha = std::min(1.0f, (T - g_state.windowShowT0)/kWindowFadeTime);
+        ImGui::SetWindowFontScale(1.0f/kFontScale);
+        ImGui::PushTextWrapPos(std::min(0.65f*ImGui::GetIO().DisplaySize.x, 400.0f));
+
+        ImGui::Text("Coming soon ...");
+
+        if (ImGui::IsWindowFocused() == false) {
+            g_state.windowShow = false;
+            g_state.windowKind = EWindowKind::None;
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::End();
+    }
+
+    ImGui::PopFont();
+    ImGui::GetStyle().Alpha = 1.0f;
 
     ImGui::End();
 
@@ -919,8 +955,8 @@ void updatePre() {
             if (ImGui::IsKeyDown(keyMap[ImGuiKey_UpArrow]))    { vt.y -= kStepPos*scale; newAnim = true; }
             if (ImGui::IsKeyDown(keyMap[ImGuiKey_DownArrow]))  { vt.y += kStepPos*scale; newAnim = true; }
 
-            if (ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*g_state.heightControls) {
-                if (ImGui::IsMouseDown(0) && g_state.isPinching == false) {
+            if (g_state.isMouseInMainCanvas()) {
+                if (ImGui::IsMouseDown(0) && g_state.isPinching == false && g_state.isPopupOpen == false && g_state.windowShow == false) {
                     // panning
                     if (g_state.isMouseDown == false) {
                         g_state.mouseDownX = ImGui::GetIO().MousePos.x;
@@ -1137,32 +1173,26 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
 
     {
         bool isNotLoaded = true;
+        const bool merge = false;
         const float fontSize = 14.0f*kFontScale;
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "DroidSans.ttf", fontSize, false);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../fonts/DroidSans.ttf", fontSize, false);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../bin/DroidSans.ttf", fontSize, false);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../examples/assets/fonts/DroidSans.ttf", fontSize, false);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../examples/assets/fonts/DroidSans.ttf", fontSize, false);
+        const char * fontName = "DroidSans.ttf";
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + fontName, fontSize, merge);
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../fonts/" + fontName, fontSize, merge);
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../bin/" + fontName, fontSize, merge);
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../examples/assets/fonts/" + fontName, fontSize, merge);
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../examples/assets/fonts/" + fontName, fontSize, merge);
     }
 
     {
         bool isNotLoaded = true;
+        const bool merge = true;
         const float fontSize = 14.0f*kFontScale;
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "fontawesome-webfont.ttf", fontSize, true);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../fonts/fontawesome-webfont.ttf", fontSize, true);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../bin/fontawesome-webfont.ttf", fontSize, true);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../examples/assets/fonts/fontawesome-webfont.ttf", fontSize, true);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../examples/assets/fonts/fontawesome-webfont.ttf", fontSize, true);
-    }
-
-    {
-        bool isNotLoaded = true;
-        const float fontSize = 9.0f*kFontScale;
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "ProggyTiny.ttf", fontSize, false);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../fonts/ProggyTiny.ttf", fontSize, false);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../bin/ProggyTiny.ttf", fontSize, false);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../examples/assets/fonts/ProggyTiny.ttf", fontSize, false);
-        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../examples/assets/fonts/ProggyTiny.ttf", fontSize, false);
+        const char * fontName = "fontawesome-webfont.ttf";
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + fontName, fontSize, merge);
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../fonts/" + fontName, fontSize, merge);
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../bin/" + fontName, fontSize, merge);
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../examples/assets/fonts/" + fontName, fontSize, merge);
+        isNotLoaded = isNotLoaded && !ImGui_tryLoadFont(getBinaryPath() + "../../examples/assets/fonts/" + fontName, fontSize, merge);
     }
 
     ImFontConfig cfg;
@@ -1285,9 +1315,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         g_state.focusId = id;
     };
 
-    g_getActionOpenId = [&]() {
-        auto res = g_state.actionOpenId;
-        g_state.actionOpenId = 0;
+    g_getActionOpenUrl = [&]() {
+        auto res = g_state.actionOpenUrl;
+        g_state.actionOpenUrl.clear();
         return res;
     };
 
