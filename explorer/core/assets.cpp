@@ -19,9 +19,10 @@ namespace {
     using Filename = const char *;
 
     const std::map<::ImVid::Assets::Id, Filename> kFilenameAsset = {
-        { ::ImVid::Assets::ICON_T2D_BIG,        "logo-big.png" },
-        { ::ImVid::Assets::ICON_T2D_SMALL,      "logo-small.png" },
-        { ::ImVid::Assets::ICON_T2D_SMALL_BLUR, "logo-small-blur.png" },
+        { ::ImVid::Assets::ICON_T2D_BIG,           "logo-big.png" },
+        { ::ImVid::Assets::ICON_T2D_SMALL,         "logo-small.png" },
+        { ::ImVid::Assets::ICON_T2D_SMALL_BLUR,    "logo-small-blur.png" },
+        { ::ImVid::Assets::ICON_T2D_NODE_SELECTED, "node-selected.png" },
     };
 }
 

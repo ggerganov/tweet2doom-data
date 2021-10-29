@@ -210,7 +210,7 @@ struct State {
     bool isMouseDown = false;
     bool isPinching = false;
     bool isPanning = false;
-    bool isPopupOpen = true;
+    bool isPopupOpen = false;
 
     float mouseDownX = 0.0f;
     float mouseDownY = 0.0f;
@@ -399,10 +399,13 @@ void renderMain() {
         ImGui::Image((void *)(intptr_t) g_state.fboEdges.getIdTex(), ImGui::GetContentRegionAvail(), { px0, py0, }, { px1, py1, });
 #else
         // imgui line rendering
-        const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xF2)/256.0f, 0.40f });
         const auto thickness = std::max(0.1, 2.0*iscale);
 
         for (const auto & edge : g_edges) {
+            const auto col = (edge.src == g_state.selectedId || edge.dst == g_state.selectedId) ?
+                ImGui::ColorConvertFloat4ToU32({ float(0xFF)/256.0f, float(0xFF)/256.0f, float(0x00)/256.0f, 0.40f }) :
+                ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xF2)/256.0f, 0.40f });
+
             const ImVec2 p0 = {
                 (g_nodes[edge.src].x - xmin)*idx*wSize.x,
                 (g_nodes[edge.src].y - ymin)*idy*wSize.y,
@@ -431,7 +434,9 @@ void renderMain() {
     }
 
     ImGui::SetWindowFontScale(1.0f*iscale/kFontScale);
-    drawList->PushTextureID((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR));
+    if (g_state.viewCur.z > 0.900f) {
+        drawList->PushTextureID((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR));
+    }
     // render nodes
     for (const auto & [id, node] : g_nodes) {
         if (node.type == 2) continue;
@@ -460,20 +465,24 @@ void renderMain() {
             ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
             ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_BIG), { 2.0f*w, 2.0f*h });
         } else {
-            if (g_state.viewCur.z > 0.900) {
+            if (g_state.viewCur.z > 0.900f) {
                 const float w = (1.0f*radius);
                 const float h = (1.0f*radius);
 
                 ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
-                ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { 2.0f*w, 2.0f*h });
-            } else if (g_state.viewCur.z > 0.500) {
+                if (id == g_state.selectedId) {
+                    ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_NODE_SELECTED), { 2.0f*w, 2.0f*h });
+                } else {
+                    ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { 2.0f*w, 2.0f*h });
+                }
+            } else if (g_state.viewCur.z > 0.500f) {
                 drawList->AddCircleFilled(pos, radius, col);
             } else {
                 drawList->AddRectFilled({ float(pos.x - radius), float(pos.y - radius) }, { float(pos.x + radius), float(pos.y + radius) }, col);
             }
         }
 
-        if (g_state.viewCur.z > 0.90 && g_state.selectedId == 0) {
+        if (g_state.viewCur.z > 0.90 && g_state.isPopupOpen == false) {
             if (g_state.isMouseInMainCanvas()) {
                 if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
                     if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
@@ -486,7 +495,9 @@ void renderMain() {
             }
         }
     }
-    drawList->PopTextureID();
+    if (g_state.viewCur.z > 0.900f) {
+        drawList->PopTextureID();
+    }
 
     // render commands
     for (const auto & [id, node] : g_nodes) {
@@ -502,7 +513,9 @@ void renderMain() {
         if (pos.x < -2.0*radius || pos.x > wSize.x + 2.0*radius) continue;
         if (pos.y < -2.0*radius || pos.y > wSize.y + 2.0*radius) continue;
 
-        const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 1.0f });
+        const auto col = (id == g_state.selectedId) ?
+            ImGui::ColorConvertFloat4ToU32({ float(0xAF)/256.0f, float(0x8F)/256.0f, float(0x20)/256.0f, 0.8f }) :
+            ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 0.4f });
 
         const ImVec2 tSize = ImGui::CalcTextSize(node.username.c_str());
         const ImVec2 tMargin = { 12.0f*iscale, 8.0f*iscale, };
@@ -520,7 +533,7 @@ void renderMain() {
             drawList->AddRectFilled(p0, p1, col);
         }
 
-        if (g_state.viewCur.z > 0.90 && g_state.selectedId == 0) {
+        if (g_state.viewCur.z > 0.90 && g_state.isPopupOpen == false) {
             if (g_state.isMouseInMainCanvas()) {
                 if (ImGui::IsMouseHoveringRect(p0, p1, true)) {
                     if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
@@ -556,8 +569,14 @@ void renderMain() {
 
             ImGui::EndPopup();
         } else {
-            g_state.isPopupOpen = false;
-            g_state.selectedId = 0;
+            if (g_state.isPopupOpen) {
+                g_state.isPopupOpen = false;
+                g_state.selectedId = 0;
+            } else {
+                //if (g_state.selectedId != 0 && T > g_state.anim.t1) {
+                //    ImGui::OpenPopup("Node");
+                //}
+            }
         }
         ImGui::PopFont();
     }
@@ -745,11 +764,10 @@ void renderMain() {
 
         {
             const auto pos = ImGui::GetCursorScreenPos();
-            const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 1.0f });
+            const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 0.4f });
 
             ImGui::GetWindowDrawList()->AddRectFilled(pos, { pos.x + kIconSize, pos.y + kIconSize }, col, 4.0f);
             ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { kIconSize, kIconSize, }, {}, {}, {}, {});
-            //ImGui::SetCursorScreenPos({ pos.x + kIconSize, pos.y });
             ImGui::SameLine();
             ImGui::Text("- Command");
         }
@@ -1259,9 +1277,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         }
 
         SDL_Event event;
-        while (SDL_PollEvent(&event))
-        {
-            g_state.nUpdates = 5;
+        while (SDL_PollEvent(&event)) {
+            g_state.nUpdates = std::max(5, g_state.nUpdates);
             ImGui_ProcessEvent(&event);
             if (event.type == SDL_QUIT) return false;
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window)) return false;
@@ -1313,6 +1330,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
     g_focusNode = [&](const NodeId & id) {
         if (id == 0) return;
         g_state.focusId = id;
+        g_state.selectedId = g_state.focusId;
     };
 
     g_getActionOpenUrl = [&]() {

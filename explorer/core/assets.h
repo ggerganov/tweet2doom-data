@@ -13,6 +13,7 @@ public:
         ICON_T2D_BIG,
         ICON_T2D_SMALL,
         ICON_T2D_SMALL_BLUR,
+        ICON_T2D_NODE_SELECTED,
     };
 
     using TexId = uint32_t;
