@@ -16,13 +16,11 @@ cmd=$(cat ./tmp/command_suggested)
 
 /usr/bin/node $dir_tweet2doom/post/post.js 0 "🕹️ Let's play
 
-Reply to the quoted tweet to continue the game.
+Reply to the quoted tweet to continue the game:
+https://twitter.com/tweet2doom/status/$id
 
 Suggested command:
 /play $cmd
-
-Tweet chain:
-https://twitter.com/tweet2doom/status/$id
 
 Node:
 https://tweet2doom.github.io/?f=$id
