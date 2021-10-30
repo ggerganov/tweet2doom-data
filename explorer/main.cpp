@@ -5,6 +5,7 @@
 #include "core/assets.h"
 
 #include "imgui-extra/imgui_impl.h"
+#include "imgui/imgui_internal.h"
 
 #ifndef ICON_FA_COGS
 #include "icons_font_awesome.h"
@@ -18,6 +19,7 @@
 #include <SDL.h>
 #include <SDL_opengl.h>
 
+#include <set>
 #include <cmath>
 #include <fstream>
 #include <vector>
@@ -33,11 +35,52 @@
 
 #include "imgui_helpers.h"
 
+// Constants
+
 const float kFontScale = 2.0f;
+const float kSizeX0 = 1000.0f;
+const float kStepPos = 100.0f;
+const float kAnimTime = 0.25f;
+const float kWindowFadeTime = 0.25f;
+
+const auto kColorBackground      = ImGui::ColorConvertFloat4ToU32({ float(0x0A)/256.0f, float(0x10)/256.0f, float(0x16)/256.0f, 0.50f });
+const auto kColorEdge            = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xF2)/256.0f, 0.40f });
+const auto kColorEdgeSelected    = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xF2)/256.0f, 0.80f });
+const auto kColorNode            = ImGui::ColorConvertFloat4ToU32({ float(0x00)/256.0f, float(0xFF)/256.0f, float(0x7D)/256.0f, 0.80f });
+const auto kColorNodeSelected    = ImGui::ColorConvertFloat4ToU32({ float(0x00)/256.0f, float(0xFF)/256.0f, float(0x7D)/256.0f, 1.00f });
+const auto kColorCommand         = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 0.40f });
+const auto kColorCommandSelected = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 0.80f });
 
 namespace {
+
 template <typename T>
 int sgn(T x) { return x < 0 ? -1 : x > 0 ? 1 : 0; }
+
+bool ScrollWhenDraggingOnVoid(ImVec2 delta, ImGuiMouseButton mouse_button) {
+    if (ImGui::GetIO().MouseDownDuration[ImGuiMouseButton_Left] == 0.0f) {
+        delta = { 0.0f, 0.0f, };
+    }
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    ImGuiWindow* window = g.CurrentWindow;
+    bool hovered = false;
+    bool held = false;
+    bool dragging = false;
+    ImGuiButtonFlags button_flags = (mouse_button == 0) ? ImGuiButtonFlags_MouseButtonLeft : (mouse_button == 1) ? ImGuiButtonFlags_MouseButtonRight : ImGuiButtonFlags_MouseButtonMiddle;
+    if (g.HoveredId == 0) // If nothing hovered so far in the frame (not same as IsAnyItemHovered()!)
+        ImGui::ButtonBehavior(window->Rect(), window->GetID("##scrolldraggingoverlay"), &hovered, &held, button_flags);
+    if (held && delta.x != 0.0f) {
+        ImGui::SetScrollX(window, window->Scroll.x + delta.x);
+    }
+    if (held && delta.y != 0.0f) {
+        auto dy = delta.y;
+        // fix vertical scroll snapping:
+        if (window->Scroll.y == 0.0f && delta.y > 0.0f && delta.y < 11.0f) dy = 11.0f;
+        ImGui::SetScrollY(window, window->Scroll.y + dy);
+        dragging = true;
+    }
+    return dragging;
+}
+
 }
 
 using NodeId = int64_t;
@@ -113,13 +156,9 @@ EMSCRIPTEN_BINDINGS(tweet2doom) {
 
 // Core
 
-const float kSizeX0 = 1000.0f;
-const float kStepPos = 100.0f;
-const float kAnimTime = 0.25f;
-const float kWindowFadeTime = 0.25f;
-
 struct Node {
     NodeId id;
+    NodeId parentId;
     std::string username;
     int level;
     int type;
@@ -141,6 +180,18 @@ float zoomFromLog(float x) {
     return std::exp(kZoomMinLog + x*(kZoomMaxLog - kZoomMinLog));
 }
 
+enum class EWindowKind {
+    None,
+    Help,
+    Statistics,
+    Achievements,
+};
+
+enum class EAchievementType {
+    LevelCompleted,
+    Speedrun,
+};
+
 struct View {
     float x;
     float y;
@@ -157,20 +208,60 @@ struct Animation {
     int type;
 };
 
-enum class EWindowKind {
-    None,
-    Help,
-    Statistics,
-    Achievements,
+struct Rendering {
+    float T;
+
+    ImVec2 wSize;
+
+    bool isAnimating;
+
+    float scale;
+    float iscale;
+
+    float xmin;
+    float ymin;
+    float xmax;
+    float ymax;
+
+    float dx;
+    float dy;
+    float idx;
+    float idy;
+
+    float textHScaled;
+};
+
+struct Achievement {
+    NodeId id;
+    NodeId announcmentId;
+    EAchievementType type;
+    std::string desc;
+};
+
+std::unordered_map<int64_t, Node> g_nodes;
+std::vector<Edge> g_edges;
+
+std::map<NodeId, Achievement> g_achievementsMap;
+std::vector<Achievement> g_achievements = {
+    { 1451989230201315328, 1452303875990593539, EAchievementType::Speedrun,       "E1M2 Best time 0:31", },
+    { 1451577865045254145, 1451579974234824708, EAchievementType::Speedrun,       "E1M1 Best time 0:10", },
+    { 1451135258993250309, 1451216719566024705, EAchievementType::LevelCompleted, "E1M5 Completed", },
+    { 1450067719299215360, 1450491942119243776, EAchievementType::LevelCompleted, "E1M4 Completed", },
+    { 1449750989595152391, 1450129558255009792, EAchievementType::LevelCompleted, "E1M3 Completed", },
+    { 1449678007149416449, 1449767161103323142, EAchievementType::LevelCompleted, "E1M2 Completed", },
+    { 1449157956096991234, 1449404776286810113, EAchievementType::Speedrun,       "E1M1 Best time 0:11", },
+    { 1448867734671040514, 1449042393391673351, EAchievementType::Speedrun,       "E1M1 Best time 0:16", },
+    { 1447603566877757445, 1447940128735961108, EAchievementType::Speedrun,       "E1M1 Best time 0:19", },
+    { 1445839902130769921, 1445845544748740612, EAchievementType::LevelCompleted, "E1M1 Completed", },
 };
 
 struct State {
     // bounding box of the nodes
-    float xmin = 1e10;
-    float xmax = -1e10;
+    float bbxmin = 1e10;
+    float bbxmax = -1e10;
 
-    float ymin = 1e10;
-    float ymax = -1e10;
+    float bbymin = 1e10;
+    float bbymax = -1e10;
 
     // viewport size at zoom = 1.0f
     float sizex0 = kSizeX0;
@@ -211,6 +302,7 @@ struct State {
     bool isPinching = false;
     bool isPanning = false;
     bool isPopupOpen = false;
+    bool doSelect = false;
 
     float mouseDownX = 0.0f;
     float mouseDownY = 0.0f;
@@ -219,9 +311,21 @@ struct State {
 
     float heightControls = 0.0f;
 
+    // stats
+    int statsNumNodesRendered = 0;
+    int statsNumCommandsRendered = 0;
+    int statsNumEdgesRendered = 0;
+    int statsNumUniquePlayers = 0;
+
+    // popup
+    ImVec2 popupPos;
+    ImVec2 popupSize;
+    float popupShowT0 = 0.0f;
+
     // rendering
     bool forceRender = false;
     int nSkipUpdate = 0;
+    Rendering rendering;
 
     // windows
     bool windowShow = false;
@@ -241,21 +345,77 @@ struct State {
     ::ImVid::ShaderProgram shaderEdges;
 #endif
 
-    float scale(float z) const { return 0.5 + (1.0 - zoomFromLog(z))*sceneScale; }
-    void onWindowResize() {
-        sceneScale = std::max(
-                1.1*(((xmax - xmin) / sizex0 - 1.0) / 0.9),
-                1.1*(((ymax - ymin) / sizey0 - 1.0) / 0.9));
+    void initRendering() {
+        rendering.T = ImGui::GetTime();
+        rendering.wSize = ImGui::GetContentRegionAvail();
+
+        rendering.isAnimating = rendering.T < anim.t1;
+
+        rendering.scale = getScale(viewCur.z);
+        rendering.iscale = (1.0/rendering.scale)/ImGui::GetIO().DisplayFramebufferScale.x;
+
+        rendering.xmin = viewCur.x - 0.5*sizex0*rendering.scale;
+        rendering.ymin = viewCur.y - 0.5*sizey0*rendering.scale;
+        rendering.xmax = viewCur.x + 0.5*sizex0*rendering.scale;
+        rendering.ymax = viewCur.y + 0.5*sizey0*rendering.scale;
+
+        rendering.dx = (rendering.xmax - rendering.xmin);
+        rendering.dy = (rendering.ymax - rendering.ymin);
+        rendering.idx = 1.0f/rendering.dx;
+        rendering.idy = 1.0f/rendering.dy;
     }
 
-    bool isMouseInMainCanvas() const {
+    inline float getScale(float z) const {
+        return 0.5 + (1.0 - zoomFromLog(z))*sceneScale;
+    }
+
+    void onWindowResize() {
+        sceneScale = std::max(
+                1.1*(((bbxmax - bbxmin) / sizex0 - 1.0) / 0.9),
+                1.1*(((bbymax - bbymin) / sizey0 - 1.0) / 0.9));
+    }
+
+    inline bool isMouseInMainCanvas() const {
         return (ImGui::GetIO().MousePos.y > 0.625f*heightControls &&
                 ImGui::GetIO().MousePos.y < ImGui::GetIO().DisplaySize.y - 1.25f*heightControls);
     }
-};
 
-std::unordered_map<int64_t, Node> g_nodes;
-std::vector<Edge> g_edges;
+    inline ImVec2 getRenderPosition(const Node & node) const {
+        return ImVec2{
+            (node.x - rendering.xmin)*rendering.idx*rendering.wSize.x,
+                (node.y - rendering.ymin)*rendering.idy*rendering.wSize.y,
+        };
+    }
+
+    inline float getRenderRadius(const Node & node) const {
+        return std::max(0.5f, (node.type == 0 ? 92.0f : 32.0f)*rendering.iscale);
+    }
+
+    inline auto getRenderCommand(const Node & node, const ImVec2 & pos) const {
+        const ImVec2 tSize = { ImGui::CalcTextSize(node.username.c_str()).x, rendering.textHScaled };
+        const ImVec2 tMargin = { 12.0f*rendering.iscale, 8.0f*rendering.iscale, };
+        const ImVec2 pt = { pos.x - 0.5f*tSize.x, pos.y - 0.5f*tSize.y, };
+        const ImVec2 p0 = { pos.x - 0.5f*tSize.x - tMargin.x, pos.y - 0.5f*tSize.y - tMargin.y, };
+        const ImVec2 p1 = { pos.x + 0.5f*tSize.x + tMargin.x, pos.y + 0.5f*tSize.y + tMargin.y, };
+
+        return std::tuple { pt, p0, p1 };
+    }
+
+    inline void focusNode(const NodeId & id, bool zoomOut) {
+        focusId = id;
+        selectedId = id;
+
+        anim.v1.x = g_nodes[id].x;
+        anim.v1.y = g_nodes[id].y;
+        anim.v1.z = 0.999f;
+
+        anim.t0 = rendering.T + 0.0f;
+        anim.t1 = rendering.T + 3.0f;
+        anim.v0 = viewCur;
+
+        anim.type = zoomOut ? 4 : 3;
+    }
+};
 
 State g_state;
 
@@ -324,11 +484,13 @@ void initMain() {
 void renderMain() {
     ImGui::NewFrame();
 
-    const float T = ImGui::GetTime();
-
     static bool isFirstFrame = true;
     if (isFirstFrame) {
         ImGui_SetStyle();
+
+        ImGuiStyle & style = ImGui::GetStyle();
+        style.Colors[ImGuiCol_Border] = ImGui::ColorConvertU32ToFloat4(kColorNode);
+
         isFirstFrame = false;
     }
 
@@ -351,38 +513,32 @@ void renderMain() {
     style.WindowPadding = saveWindowPadding;
     style.WindowBorderSize = saveWindowBorderSize;
 
-    const auto wSize = ImGui::GetContentRegionAvail();
-
     auto drawList = ImGui::GetWindowDrawList();
 
+    g_state.initRendering();
+
+    const auto & T = g_state.rendering.T;
+    const auto & wSize = g_state.rendering.wSize;
+
+    const auto & isAnimating = g_state.rendering.isAnimating;
+
+    const auto & scale  = g_state.rendering.scale;
+    const auto & iscale = g_state.rendering.iscale;
+
+    g_state.statsNumEdgesRendered = 0;
+    g_state.statsNumNodesRendered = 0;
+    g_state.statsNumCommandsRendered = 0;
+
     // background
-    {
-        const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x0A)/256.0f, float(0x10)/256.0f, float(0x16)/256.0f, 0.5f });
-        drawList->AddRectFilled({ 0.0f, 0.0f }, wSize, col);
-    }
-
-    const bool isAnimating = T < g_state.anim.t1;
-
-    const float scale = g_state.scale(g_state.viewCur.z);
-    const float iscale = (1.0/scale)/ImGui::GetIO().DisplayFramebufferScale.x;
-
-    const float xmin = g_state.viewCur.x - 0.5*g_state.sizex0*scale;
-    const float ymin = g_state.viewCur.y - 0.5*g_state.sizey0*scale;
-    const float xmax = g_state.viewCur.x + 0.5*g_state.sizex0*scale;
-    const float ymax = g_state.viewCur.y + 0.5*g_state.sizey0*scale;
-
-    const float dx = (xmax - xmin);
-    const float dy = (ymax - ymin);
-    const float idx = 1.0f/dx;
-    const float idy = 1.0f/dy;
+    drawList->AddRectFilled({ 0.0f, 0.0f }, wSize, kColorBackground);
 
     if (g_state.viewCur.z >= g_state.renderingEdgesMinZ) {
 #ifdef USE_LINE_SHADER
         // shader-based line rendering
         const float f = scale/g_state.scaleEdges;
         const float ds = 0.5*(1.0 - f);
-        const float dx = f*(g_state.viewCur.x - g_state.posEdgesX)*idx;
-        const float dy = f*(g_state.viewCur.y - g_state.posEdgesY)*idy;
+        const float dx = f*(g_state.viewCur.x - g_state.posEdgesX)*g_state.rendering.idx;
+        const float dy = f*(g_state.viewCur.y - g_state.posEdgesY)*g_state.rendering.idy;
 
         const float x0 = ds + dx;
         const float x1 = 1.0f - ds + dx;
@@ -402,19 +558,10 @@ void renderMain() {
         const auto thickness = std::max(0.1, 2.0*iscale);
 
         for (const auto & edge : g_edges) {
-            const auto col = (edge.src == g_state.selectedId || edge.dst == g_state.selectedId) ?
-                ImGui::ColorConvertFloat4ToU32({ float(0xFF)/256.0f, float(0xFF)/256.0f, float(0x00)/256.0f, 0.40f }) :
-                ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xF2)/256.0f, 0.40f });
+            const auto col = (edge.src == g_state.selectedId || edge.dst == g_state.selectedId) ?  kColorEdgeSelected : kColorEdge;
 
-            const ImVec2 p0 = {
-                (g_nodes[edge.src].x - xmin)*idx*wSize.x,
-                (g_nodes[edge.src].y - ymin)*idy*wSize.y,
-            };
-
-            const ImVec2 p1 = {
-                (g_nodes[edge.dst].x - xmin)*idx*wSize.x,
-                (g_nodes[edge.dst].y - ymin)*idy*wSize.y,
-            };
+            const auto p0 = g_state.getRenderPosition(g_nodes[edge.src]);
+            const auto p1 = g_state.getRenderPosition(g_nodes[edge.dst]);
 
             const float cull = 1000.0f;
 
@@ -429,102 +576,107 @@ void renderMain() {
             }
 
             drawList->AddLine(p0, p1, col, thickness);
+            g_state.statsNumEdgesRendered++;
         }
 #endif
     }
 
     ImGui::SetWindowFontScale(1.0f*iscale/kFontScale);
-    if (g_state.viewCur.z > 0.900f) {
-        drawList->PushTextureID((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR));
-    }
+    g_state.rendering.textHScaled = ImGui::CalcTextSize("X").y;
+
     // render nodes
-    for (const auto & [id, node] : g_nodes) {
-        if (node.type == 2) continue;
-
-        const ImVec2 pos = {
-            (node.x - xmin)*idx*wSize.x,
-            (node.y - ymin)*idy*wSize.y,
-        };
-
-        const float radius = std::max(0.5f, (node.type == 0 ? 92.0f : 32.0f)*iscale);
-
-        if (pos.x < -2.0*radius || pos.x > wSize.x + 2.0*radius) continue;
-        if (pos.y < -2.0*radius || pos.y > wSize.y + 2.0*radius) continue;
-
-        const auto col = node.type == 2 ?
-            ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 1.0f }) :
-            ImGui::ColorConvertFloat4ToU32({ float(0x00)/256.0f, float(0xFF)/256.0f, float(0x7D)/256.0f, 1.0f });
-
-        const ImVec2 h0 = { pos.x - 2.0f*radius, pos.y - 2.0f*radius };
-        const ImVec2 h1 = { pos.x + 2.0f*radius, pos.y + 2.0f*radius };
-
-        if (node.type == 0) {
-            const float w = (1.8f*radius);
-            const float h = (3.2f*radius);
-
-            ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
-            ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_BIG), { 2.0f*w, 2.0f*h });
-        } else {
-            if (g_state.viewCur.z > 0.900f) {
-                const float w = (1.0f*radius);
-                const float h = (1.0f*radius);
-
-                ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
-                if (id == g_state.selectedId) {
-                    ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_NODE_SELECTED), { 2.0f*w, 2.0f*h });
-                } else {
-                    ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { 2.0f*w, 2.0f*h });
-                }
-            } else if (g_state.viewCur.z > 0.500f) {
-                drawList->AddCircleFilled(pos, radius, col);
-            } else {
-                drawList->AddRectFilled({ float(pos.x - radius), float(pos.y - radius) }, { float(pos.x + radius), float(pos.y + radius) }, col);
-            }
+    {
+        if (g_state.viewCur.z > 0.900f) {
+            drawList->PushTextureID((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR));
         }
 
-        if (g_state.viewCur.z > 0.90 && g_state.isPopupOpen == false) {
-            if (g_state.isMouseInMainCanvas()) {
-                if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
-                    if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
-                        ImGui::SetNextWindowPos({ h1.x, h0.y });
+        for (const auto & [id, node] : g_nodes) {
+            if (node.type == 2) continue;
 
-                        ImGui::OpenPopup("Node");
-                        g_state.selectedId = id;
+            const auto pos = g_state.getRenderPosition(node);
+            const auto radius = g_state.getRenderRadius(node);
+
+            if (pos.x < -2.0*radius || pos.x > wSize.x + 2.0*radius) continue;
+            if (pos.y < -2.0*radius || pos.y > wSize.y + 2.0*radius) continue;
+
+            const auto col = kColorNode;
+
+            const ImVec2 h0 = { pos.x - 2.0f*radius, pos.y - 2.0f*radius };
+            const ImVec2 h1 = { pos.x + 2.0f*radius, pos.y + 2.0f*radius };
+
+            if (node.type == 0) {
+                const float w = (1.8f*radius);
+                const float h = (3.2f*radius);
+
+                ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
+                ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_BIG), { 2.0f*w, 2.0f*h });
+            } else {
+                if (g_state.viewCur.z > 0.900f) {
+                    const float w = (1.0f*radius);
+                    const float h = (1.0f*radius);
+
+                    ImGui::SetCursorScreenPos({ pos.x - w, pos.y - h, });
+                    if (id == g_state.selectedId) {
+                        ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { 2.0f*w, 2.0f*h }, { 0.0f, 0.0f }, { 1.0f, 1.0f }, ImGui::ColorConvertU32ToFloat4(kColorNodeSelected));
+                    } else {
+                        ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { 2.0f*w, 2.0f*h }, { 0.0f, 0.0f }, { 1.0f, 1.0f }, ImGui::ColorConvertU32ToFloat4(kColorNode));
+                    }
+                } else if (g_state.viewCur.z > 0.500f) {
+                    drawList->AddCircleFilled(pos, radius, col);
+                } else {
+                    drawList->AddRectFilled({ float(pos.x - radius), float(pos.y - radius) }, { float(pos.x + radius), float(pos.y + radius) }, col);
+                }
+            }
+            g_state.statsNumNodesRendered++;
+
+            if (g_state.viewCur.z > 0.90 && g_state.isPopupOpen == false) {
+                if (g_state.isMouseInMainCanvas()) {
+                    if (ImGui::IsMouseHoveringRect(h0, h1, true)) {
+                        if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false && g_state.windowShow == false) {
+                            ImGui::SetNextWindowPos({ pos.x + 0.05f*wSize.x, pos.y - std::max(200.0f, 0.25f*wSize.y) });
+
+                            ImGui::OpenPopup("Node");
+                            g_state.selectedId = id;
+                            g_state.popupShowT0 = T;
+                            g_state.nUpdates = kWindowFadeTime/0.016f + 1.0f;
+                        }
                     }
                 }
             }
+
+            if (g_state.doSelect && g_state.focusId == id && isAnimating == false) {
+                ImGui::SetNextWindowPos({ pos.x + 0.05f*wSize.x, pos.y - std::max(200.0f, 0.25f*wSize.y) });
+
+                ImGui::OpenPopup("Node");
+                g_state.selectedId = id;
+                g_state.popupShowT0 = T;
+                g_state.nUpdates = kWindowFadeTime/0.016f + 1.0f;
+                g_state.doSelect = false;
+            }
         }
-    }
-    if (g_state.viewCur.z > 0.900f) {
-        drawList->PopTextureID();
+
+        if (g_state.viewCur.z > 0.900f) {
+            drawList->PopTextureID();
+        }
     }
 
     // render commands
     for (const auto & [id, node] : g_nodes) {
         if (node.type != 2) continue;
 
-        const ImVec2 pos = {
-            (node.x - xmin)*idx*wSize.x,
-            (node.y - ymin)*idy*wSize.y,
-        };
-
-        const float radius = std::max(0.5f, (node.type == 0 ? 92.0f : 32.0f)*iscale);
+        const auto pos    = g_state.getRenderPosition(node);
+        const auto radius = g_state.getRenderRadius(node);
 
         if (pos.x < -2.0*radius || pos.x > wSize.x + 2.0*radius) continue;
         if (pos.y < -2.0*radius || pos.y > wSize.y + 2.0*radius) continue;
 
-        const auto col = (id == g_state.selectedId) ?
-            ImGui::ColorConvertFloat4ToU32({ float(0xAF)/256.0f, float(0x8F)/256.0f, float(0x20)/256.0f, 0.8f }) :
-            ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 0.4f });
+        const auto col = (id == g_state.selectedId) ? kColorCommandSelected : kColorCommand;
 
-        const ImVec2 tSize = ImGui::CalcTextSize(node.username.c_str());
-        const ImVec2 tMargin = { 12.0f*iscale, 8.0f*iscale, };
-        const ImVec2 pt = { pos.x - 0.5f*tSize.x, pos.y - 0.5f*tSize.y, };
-        const ImVec2 p0 = { pos.x - 0.5f*tSize.x - tMargin.x, pos.y - 0.5f*tSize.y - tMargin.y, };
-        const ImVec2 p1 = { pos.x + 0.5f*tSize.x + tMargin.x, pos.y + 0.5f*tSize.y + tMargin.y, };
+        const auto [ pt, p0, p1 ] = g_state.getRenderCommand(node, pos);
 
         if (g_state.viewCur.z > 0.98) {
             drawList->AddRectFilled(p0, p1, col, 8.0);
+            drawList->AddRect(p0, p1, g_state.selectedId == id ? kColorNodeSelected : kColorNode, 8.0);
             if (g_state.viewCur.z > 0.980) {
                 ImGui::SetCursorScreenPos(pt);
                 ImGui::Text("%s", node.username.c_str());
@@ -532,39 +684,115 @@ void renderMain() {
         } else {
             drawList->AddRectFilled(p0, p1, col);
         }
+        g_state.statsNumCommandsRendered++;
 
         if (g_state.viewCur.z > 0.90 && g_state.isPopupOpen == false) {
             if (g_state.isMouseInMainCanvas()) {
                 if (ImGui::IsMouseHoveringRect(p0, p1, true)) {
                     if (ImGui::IsMouseReleased(0) && g_state.isPanning == false && isAnimating == false) {
-                        ImGui::SetNextWindowPos({ p1.x, p0.y });
+                        ImGui::SetNextWindowPos({ pos.x + 0.05f*wSize.x, pos.y - std::max(200.0f, 0.25f*wSize.y) });
 
                         ImGui::OpenPopup("Node");
                         g_state.selectedId = id;
+                        g_state.popupShowT0 = T;
+                        g_state.nUpdates = kWindowFadeTime/0.016f + 1.0f;
                     }
                 }
             }
         }
     }
 
-    {
+    if (g_nodes.find(g_state.selectedId) != g_nodes.end()) {
         ImGui::PushFont(ImGui::GetIO().Fonts->Fonts.back());
         ImGui::SetWindowFontScale(1.0f/kFontScale);
+
+        const float t = (T - g_state.popupShowT0)/kWindowFadeTime;
+        ImGui::GetStyle().Alpha = std::min(1.0f, t);
+
         if (ImGui::BeginPopup("Node")) {
+            g_state.popupPos = ImGui::GetWindowPos();
+            g_state.popupSize = ImGui::GetWindowSize();
+
+            if (g_state.isPopupOpen) {
+                const auto & node = g_nodes[g_state.selectedId];
+
+                const auto pos = g_state.getRenderPosition(node);
+
+                const auto col4 = ImGui::ColorConvertU32ToFloat4(kColorNode);
+                const auto col = ImGui::ColorConvertFloat4ToU32(ImVec4(col4.x, col4.y, col4.z, t));
+
+                const ImVec2 pp0 = { g_state.popupPos.x                      , g_state.popupPos.y                       };
+                const ImVec2 pp1 = { g_state.popupPos.x + g_state.popupSize.x, g_state.popupPos.y                       };
+                const ImVec2 pp2 = { g_state.popupPos.x + g_state.popupSize.x, g_state.popupPos.y + g_state.popupSize.y };
+                const ImVec2 pp3 = { g_state.popupPos.x                      , g_state.popupPos.y + g_state.popupSize.y };
+
+                //ImVec2 pn0;
+                //ImVec2 pn1;
+                //ImVec2 pn2;
+                //ImVec2 pn3;
+
+                //if (node.type == 2) {
+                //    const auto [ pt, p0, p1 ] = g_state.getRenderCommand(node, pos);
+
+                //    pn0 = { pos.x, p0.y };
+                //    pn1 = { pos.x, p1.y };
+                //} else {
+                //    const auto radius = g_state.getRenderRadius(node);
+                //    pn0 = { pos.x, pos.y - radius };
+                //    pn1 = { pos.x, pos.y + radius };
+                //}
+
+                drawList->AddLine(pos, pp0, col);
+                drawList->AddLine(pos, pp1, col);
+                drawList->AddLine(pos, pp2, col);
+                drawList->AddLine(pos, pp3, col);
+            }
+
             g_state.isPopupOpen = true;
 
             const auto & node = g_nodes[g_state.selectedId];
             ImGui::Text("Node:   %" PRIu64 "", g_state.selectedId);
-            ImGui::Text("Player: %s", node.username.c_str());
-            ImGui::Text("Pos:    %.0f %.0f", node.x, node.y);
+            if (node.type == 1) {
+                ImGui::Text("Author: %s", g_nodes[node.parentId].username.c_str());
+            } else if (node.type == 2) {
+                ImGui::Text("Author: %s", node.username.c_str());
+            }
+            //ImGui::Text("Pos:    %.0f %.0f", node.x, node.y);
             ImGui::Text("Type:   %s", node.type == 0 ? "ROOT" : node.type == 1 ? "Node" : "Command");
             ImGui::Text("Depth:  %d", node.level);
+            if (g_achievementsMap.find(node.id) != g_achievementsMap.end()) {
+                const auto & achievement = g_achievementsMap[node.id];
+                const auto col = ImGui::ColorConvertU32ToFloat4(kColorNodeSelected);
+                ImGui::Text("%s\n", "");
+                auto icon = ICON_FA_TROPHY;
+                switch (achievement.type) {
+                    case EAchievementType::LevelCompleted: { icon = ICON_FA_TROPHY;     } break;
+                    case EAchievementType::Speedrun:       { icon = ICON_FA_HOURGLASS_HALF;  } break;
+                };
+                const int nFonts = ImGui::GetIO().Fonts->Fonts.size();
+                ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[nFonts - 2]);
+                ImGui::TextColored(col, "%s", icon);
+                ImGui::PopFont();
+                ImGui::SameLine();
+                ImGui::TextColored(col, "%s", achievement.desc.c_str());
+            }
 
             ImGui::Separator();
 
             if (ImGui::Button("Twitter")) {
                 g_state.actionOpenUrl = "https://twitter.com/tweet2doom/status/" + std::to_string(g_state.selectedId);
-                ImGui::CloseCurrentPopup();
+            }
+            if (g_achievementsMap.find(node.id) != g_achievementsMap.end()) {
+                ImGui::SameLine();
+                if (ImGui::Button("Announcement")) {
+                    const auto & achievement = g_achievementsMap[node.id];
+                    g_state.actionOpenUrl = "https://twitter.com/tweet2doom/status/" + std::to_string(achievement.announcmentId);
+                }
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Focus")) {
+                g_state.focusNode(g_state.selectedId, false);
             }
 
             ImGui::EndPopup();
@@ -572,12 +800,11 @@ void renderMain() {
             if (g_state.isPopupOpen) {
                 g_state.isPopupOpen = false;
                 g_state.selectedId = 0;
-            } else {
-                //if (g_state.selectedId != 0 && T > g_state.anim.t1) {
-                //    ImGui::OpenPopup("Node");
-                //}
             }
         }
+
+        ImGui::GetStyle().Alpha = 1.0f;
+
         ImGui::PopFont();
     }
 
@@ -738,11 +965,6 @@ void renderMain() {
         g_state.heightControls = 2.0f*(kGridSize + kGridOffset.y);
     }
 
-
-    //if (ImGui::IsMouseHoveringRect({ 0.0f, 0.0f }, wSize)) {
-    //    m_state.mousePos.from(ImGui::GetIO().MousePos);
-    //}
-
     ImGui::PushFont(ImGui::GetIO().Fonts->Fonts.back());
 
     // window : Help
@@ -758,24 +980,25 @@ void renderMain() {
         ImGui::GetStyle().Alpha = std::min(1.0f, (T - g_state.windowShowT0)/kWindowFadeTime);
         ImGui::SetWindowFontScale(1.0f/kFontScale);
         ImGui::PushTextWrapPos(std::min(0.65f*ImGui::GetIO().DisplaySize.x, 400.0f));
+
         ImGui::Text("This is the State Tree Explorer of the @tweet2doom Twitter bot. "
                     "The tree contains all commands ever tweeted to the bot and the resulting game states (i.e. nodes). "
                     "\n\n");
 
         {
-            const auto pos = ImGui::GetCursorScreenPos();
-            const auto col = ImGui::ColorConvertFloat4ToU32({ float(0x1D)/256.0f, float(0xA1)/256.0f, float(0xA2)/256.0f, 0.4f });
-
-            ImGui::GetWindowDrawList()->AddRectFilled(pos, { pos.x + kIconSize, pos.y + kIconSize }, col, 4.0f);
-            ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { kIconSize, kIconSize, }, {}, {}, {}, {});
+            ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { kIconSize, kIconSize, }, { 0.0f, 0.0f }, { 1.0f, 1.0f }, ImGui::ColorConvertU32ToFloat4(kColorNode));
             ImGui::SameLine();
-            ImGui::Text("- Command");
+            ImGui::Text("- Node");
         }
 
         {
-            ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { kIconSize, kIconSize, });
+            const auto pos = ImGui::GetCursorScreenPos();
+
+            ImGui::GetWindowDrawList()->AddRectFilled(pos, { pos.x + kIconSize, pos.y + kIconSize }, kColorCommand, 4.0f);
+            ImGui::GetWindowDrawList()->AddRect      (pos, { pos.x + kIconSize, pos.y + kIconSize }, kColorNode,    4.0f);
+            ImGui::Image((void *)(intptr_t) g_state.assets.getTexId(::ImVid::Assets::ICON_T2D_SMALL_BLUR), { kIconSize, kIconSize, }, {}, {}, {}, {});
             ImGui::SameLine();
-            ImGui::Text("- Node");
+            ImGui::Text("- Command");
         }
 
         ImGui::Text("\n");
@@ -784,77 +1007,133 @@ void renderMain() {
         if (ImGui::Button("https://twitter.com/tweet2doom")) {
             g_state.actionOpenUrl = "https://twitter.com/tweet2doom/status/1444355917160534024";
         }
-        if (ImGui::IsWindowFocused() == false) {
-            g_state.windowShow = false;
-            g_state.windowKind = EWindowKind::None;
-        }
+
         ImGui::PopTextWrapPos();
         ImGui::End();
     }
 
     // window : Statistics
     if (g_state.windowShow && g_state.windowKind == EWindowKind::Statistics) {
+        static ImVec2 wSize;
+        const float t = (T - g_state.windowShowT0)/kWindowFadeTime;
+        if (t > 0.1f) {
+            wSize.x = std::min(400.0f, wSize.x);
+            wSize.y = std::min(0.75f*g_state.rendering.wSize.y, wSize.y);
+            ImGui::SetNextWindowSize(wSize);
+        }
         ImGui::Begin("Statistics", nullptr,
                      ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoResize |
                      ImGuiWindowFlags_NoCollapse |
                      ImGuiWindowFlags_NoScrollbar |
-                     ImGuiWindowFlags_AlwaysAutoResize);
-        ImGui::GetStyle().Alpha = std::min(1.0f, (T - g_state.windowShowT0)/kWindowFadeTime);
+                     ImGuiWindowFlags_NoScrollWithMouse |
+                     (t < 0.1f ? ImGuiWindowFlags_AlwaysAutoResize : 0));
+        if (t < 0.1f) wSize = ImGui::GetWindowSize();
+
+        ImGui::GetStyle().Alpha = std::min(1.0f, t);
         ImGui::SetWindowFontScale(1.0f/kFontScale);
+
         ImGui::PushTextWrapPos(std::min(0.65f*ImGui::GetIO().DisplaySize.x, 400.0f));
 
-        ImGui::Text("Total nodes: %d\n", (int) g_nodes.size());
-        ImGui::Separator();
-        ImGui::Text("Debug information:");
-        ImGui::Text("Zoom:      %.5f", g_state.viewCur.z);
-        ImGui::Text("Mouse:     %.0f, %0.f", ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y);
-        ImGui::Text("Framerate: %.2f (%d)", ImGui::GetIO().Framerate, g_state.nUpdates);
-        ImGui::Text("Display:   %.0f %.0f", ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-        ImGui::Text("v0:        %.3f, %.3f, %.3f, %.3f,", g_state.anim.v0.x, g_state.anim.v0.y, g_state.anim.v0.z, g_state.anim.t0);
-        ImGui::Text("v1:        %.3f, %.3f, %.3f, %.3f,", g_state.anim.v1.x, g_state.anim.v1.y, g_state.anim.v1.z, g_state.anim.t1);
-        ImGui::Text("cur:       %.3f, %.3f, %.3f, %.3f,", g_state.viewCur.x, g_state.viewCur.y, g_state.viewCur.z, ImGui::GetTime());
+        ImGui::Text("Total nodes:    %d\n", (int) g_nodes.size());
+        ImGui::Text("Unique players: %d\n", g_state.statsNumUniquePlayers);
 
-        if (ImGui::IsWindowFocused() == false) {
-            g_state.windowShow = false;
-            g_state.windowKind = EWindowKind::None;
-        }
+        ImGui::Separator();
+        ImGui::TextDisabled("Rendering info");
+        ImGui::Separator();
+        ImGui::Text("Zoom:      %.5f", g_state.viewCur.z);
+        ImGui::Text("Mouse:     %.0f %.0f", std::max(0.0f, ImGui::GetIO().MousePos.x), std::max(0.0f, ImGui::GetIO().MousePos.y));
+        ImGui::Text("Framerate: %.2f (%d, %.3f)", ImGui::GetIO().Framerate, g_state.nUpdates, T);
+        ImGui::Text("Display:   %.0f %.0f", ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
+        ImGui::Text("Nodes:     %d", g_state.statsNumNodesRendered);
+        ImGui::Text("Commands:  %d", g_state.statsNumCommandsRendered);
+        ImGui::Text("Edges:     %d", g_state.statsNumEdgesRendered);
+
+        ImGui::Separator();
+        ImGui::TextDisabled("Build info");
+        ImGui::Separator();
+        ImGui::Text("%s", BUILD_TIMESTAMP);
+
         ImGui::PopTextWrapPos();
+
+        ScrollWhenDraggingOnVoid(ImVec2(-ImGui::GetIO().MouseDelta.x, -ImGui::GetIO().MouseDelta.y), ImGuiMouseButton_Left);
         ImGui::End();
     }
 
     // window : Achievements
     if (g_state.windowShow && g_state.windowKind == EWindowKind::Achievements) {
+        static ImVec2 wSize;
+        const float t = (T - g_state.windowShowT0)/kWindowFadeTime;
+        if (t > 0.1f) {
+            wSize.x = std::min(400.0f, wSize.x);
+            wSize.y = std::min(0.75f*g_state.rendering.wSize.y, wSize.y);
+            ImGui::SetNextWindowSize(wSize);
+        }
         ImGui::Begin("Achievements", nullptr,
                      ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoResize |
                      ImGuiWindowFlags_NoCollapse |
                      ImGuiWindowFlags_NoScrollbar |
-                     ImGuiWindowFlags_AlwaysAutoResize);
+                     (t < 0.1f ? ImGuiWindowFlags_AlwaysAutoResize : 0));
+        if (t < 0.1f) wSize = ImGui::GetWindowSize();
+
         ImGui::GetStyle().Alpha = std::min(1.0f, (T - g_state.windowShowT0)/kWindowFadeTime);
         ImGui::SetWindowFontScale(1.0f/kFontScale);
+
         ImGui::PushTextWrapPos(std::min(0.65f*ImGui::GetIO().DisplaySize.x, 400.0f));
 
-        ImGui::Text("Coming soon ...");
+        ImVec2 p0;
+        for (int i = 0; i < (int) g_achievements.size(); ++i) {
+            ImGui::PushID(i);
+            auto icon = ICON_FA_TROPHY;
+            switch (g_achievements[i].type) {
+                case EAchievementType::LevelCompleted: { icon = ICON_FA_TROPHY;     } break;
+                case EAchievementType::Speedrun:       { icon = ICON_FA_HOURGLASS_HALF;  } break;
+            };
 
-        if (ImGui::IsWindowFocused() == false) {
-            g_state.windowShow = false;
-            g_state.windowKind = EWindowKind::None;
+            const int nFonts = ImGui::GetIO().Fonts->Fonts.size();
+            const auto col = ImGui::ColorConvertU32ToFloat4(kColorNodeSelected);
+            ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[nFonts - 2]);
+            if (ImGui::Button(ICON_FA_CROSSHAIRS)) {
+                g_state.focusNode(g_achievements[i].id, true);
+                g_state.doSelect = true;
+                g_state.windowShow = false;
+                g_state.windowKind = EWindowKind::None;
+            }
+            ImGui::SameLine();
+            ImGui::TextColored(col, "%s", icon);
+            ImGui::PopFont();
+            ImGui::SameLine();
+            if (i == 0) {
+                p0 = ImGui::GetCursorScreenPos();
+            } else {
+                ImGui::SetCursorScreenPos({ p0.x, ImGui::GetCursorScreenPos().y });
+            }
+            ImGui::TextColored(col, "%s", g_achievements[i].desc.c_str());
+            ImGui::PopID();
         }
+
         ImGui::PopTextWrapPos();
+
+        ScrollWhenDraggingOnVoid(ImVec2(-ImGui::GetIO().MouseDelta.x, -ImGui::GetIO().MouseDelta.y), ImGuiMouseButton_Left);
         ImGui::End();
     }
 
     ImGui::PopFont();
     ImGui::GetStyle().Alpha = 1.0f;
 
+    if (ImGui::IsWindowFocused()) {
+        g_state.windowShow = false;
+        g_state.windowKind = EWindowKind::None;
+    }
+
     ImGui::End();
 
     ImGui::EndFrame();
 }
 
-bool interp(float & x, float x0, float x1, float t0, float t1, float t, int type) {
-    if (x == x1) return false;
+bool interp(float & x, float x0, float x1, float t0, float t1, float t, int type, bool isZoom) {
+    if (x == x1 && type != 4) return false;
     if (t < t0) {
         x = x0;
         return true;
@@ -863,15 +1142,26 @@ bool interp(float & x, float x0, float x1, float t0, float t1, float t, int type
         x = x1;
         return true;
     }
-    if (x0 == x1) return false;
 
-    const float f = (t - t0)/(t1 - t0);
+    float f = (t - t0)/(t1 - t0);
     if (type == 1) {
         x = x0 + (x1 - x0)*std::pow(f, 4);
     } else if (type == 2) {
         x = x0 + (x1 - x0)*std::pow(f, 0.5);
     } else if (type == 3) {
         x = x0 + (x1 - x0)*(f*f*(3.0f - 2.0f*f));
+    } else if (type == 4) {
+        if (isZoom) {
+            if (f < 0.5f) {
+                f = 2.0f*f;
+                x = x0 + (0.1f - x0)*(f*f*(3.0f - 2.0f*f));
+            } else {
+                f = 2.0f*(f - 0.5f);
+                x = 0.1f + (x1 - 0.1f)*(f*f*(3.0f - 2.0f*f));
+            }
+        } else {
+            x = x0 + (x1 - x0)*(f*f*(3.0f - 2.0f*f));
+        }
     } else {
         // linear
         x = x0 + ((x1 - x0)/(t1 - t0))*(t - t0);
@@ -884,6 +1174,10 @@ void updatePre() {
     const float T = ImGui::GetTime();
 
     if (g_state.treeChanged) {
+        for (auto & [src, dst] : g_edges) {
+            g_nodes[src].parentId = dst;
+        }
+
         for (auto & [id, node] : g_nodes) {
             if (node.type == 0) {
                 g_state.rootId = id;
@@ -900,10 +1194,10 @@ void updatePre() {
         }
 
         for (const auto & [id, node] : g_nodes) {
-            if (node.x < g_state.xmin) g_state.xmin = node.x;
-            if (node.x > g_state.xmax) g_state.xmax = node.x;
-            if (node.y < g_state.ymin) g_state.ymin = node.y;
-            if (node.y > g_state.ymax) g_state.ymax = node.y;
+            if (node.x < g_state.bbxmin) g_state.bbxmin = node.x;
+            if (node.x > g_state.bbxmax) g_state.bbxmax = node.x;
+            if (node.y < g_state.bbymin) g_state.bbymin = node.y;
+            if (node.y > g_state.bbymax) g_state.bbymax = node.y;
         }
 
         g_state.onWindowResize();
@@ -926,7 +1220,7 @@ void updatePre() {
             } else {
                 g_state.anim.v1.x = g_nodes[g_state.focusId].x;
                 g_state.anim.v1.y = g_nodes[g_state.focusId].y;
-                g_state.anim.v1.z = 1.0f;
+                g_state.anim.v1.z = 0.999f;
 
                 g_state.anim.t0 = T + 0.5f;
                 g_state.anim.t1 = T + 3.5f;
@@ -937,10 +1231,24 @@ void updatePre() {
                 g_state.anim.type = 3;
             }
 
+            for (const auto & achievement : g_achievements) {
+                g_achievementsMap[achievement.id] = achievement;
+            }
+
+            {
+                std::set<std::string> seen;
+                for (const auto & node : g_nodes) {
+                    if (seen.find(node.second.username) == seen.end()) {
+                        seen.emplace(node.second.username);
+                        g_state.statsNumUniquePlayers++;
+                    }
+                }
+            }
+
             g_state.isFirstChange = false;
         }
 
-        printf("Bounding box: [%g %g -> %g %g]\n", g_state.xmin, g_state.ymin, g_state.xmax, g_state.ymax);
+        printf("Bounding box: [%g %g -> %g %g]\n", g_state.bbxmin, g_state.bbymin, g_state.bbxmax, g_state.bbymax);
         printf("Scene scale:  %g\n", g_state.sceneScale);
 
         g_state.treeChanged = false;
@@ -959,7 +1267,7 @@ void updatePre() {
     g_state.isZooming = false;
 
     {
-        const float scale = g_state.scale(g_state.viewCur.z);
+        const float scale = g_state.getScale(g_state.viewCur.z);
 
         bool newAnim = false;
         View vt = g_state.viewCur;
@@ -998,7 +1306,7 @@ void updatePre() {
                     g_state.isPanning = false;
                 }
 
-                if (ImGui::IsMouseDoubleClicked(0)) {
+                if (ImGui::IsMouseDoubleClicked(0) && g_state.windowShow == false) {
                     float dx = (ImGui::GetIO().MousePos.x - 0.5f*ImGui::GetIO().DisplaySize.x)*scale*(g_state.sizex0/ImGui::GetIO().DisplaySize.x);
                     float dy = (ImGui::GetIO().MousePos.y - 0.5f*ImGui::GetIO().DisplaySize.y)*scale*(g_state.sizey0/ImGui::GetIO().DisplaySize.y);
 
@@ -1020,7 +1328,7 @@ void updatePre() {
                     vt.z += 0.3*mwheel*(1.001f - g_state.viewCur.z); newAnim = true;
 
                     const float s0 = scale;
-                    const float s1 = g_state.scale(vt.z);
+                    const float s1 = g_state.getScale(vt.z);
 
                     vt.x += ((ImGui::GetIO().MousePos.x - 0.5f*ImGui::GetIO().DisplaySize.x)/ImGui::GetIO().DisplaySize.x)*(s0 - s1)*g_state.sizex0;
                     vt.y += ((ImGui::GetIO().MousePos.y - 0.5f*ImGui::GetIO().DisplaySize.y)/ImGui::GetIO().DisplaySize.y)*(s0 - s1)*g_state.sizey0;
@@ -1031,7 +1339,7 @@ void updatePre() {
                 vt.z = g_state.viewPinch.z - 1.0f*(1.0f - g_state.pinchScale)*(1.001f - g_state.viewCur.z);
 
                 const float s0 = scale;
-                const float s1 = g_state.scale(vt.z);
+                const float s1 = g_state.getScale(vt.z);
 
                 vt.x += ((g_state.pinchPosX1 - 0.5f*ImGui::GetIO().DisplaySize.x)/ImGui::GetIO().DisplaySize.x)*(s0 - s1)*g_state.sizex0;
                 vt.y += ((g_state.pinchPosY1 - 0.5f*ImGui::GetIO().DisplaySize.y)/ImGui::GetIO().DisplaySize.y)*(s0 - s1)*g_state.sizey0;
@@ -1048,7 +1356,7 @@ void updatePre() {
                 g_state.anim.v1 = vt;
                 g_state.anim.type = 2;
 
-                g_state.nUpdates = 1;
+                g_state.nUpdates = std::max(1, g_state.nUpdates);
             }
 
             //printf("%g %g\n", g_state.viewCur.z, g_state.zoomTgt);
@@ -1056,12 +1364,12 @@ void updatePre() {
 
         g_state.anim.v1.z = std::max(kZoomMin, std::min(kZoomMax, g_state.anim.v1.z));
 
-        g_state.isMoving  |= interp(g_state.viewCur.x, g_state.anim.v0.x, g_state.anim.v1.x, g_state.anim.t0, g_state.anim.t1, T, g_state.anim.type);
-        g_state.isMoving  |= interp(g_state.viewCur.y, g_state.anim.v0.y, g_state.anim.v1.y, g_state.anim.t0, g_state.anim.t1, T, g_state.anim.type);
-        g_state.isZooming |= interp(g_state.viewCur.z, g_state.anim.v0.z, g_state.anim.v1.z, g_state.anim.t0, g_state.anim.t1, T, g_state.anim.type);
+        g_state.isMoving  |= interp(g_state.viewCur.x, g_state.anim.v0.x, g_state.anim.v1.x, g_state.anim.t0, g_state.anim.t1, T, g_state.anim.type, false);
+        g_state.isMoving  |= interp(g_state.viewCur.y, g_state.anim.v0.y, g_state.anim.v1.y, g_state.anim.t0, g_state.anim.t1, T, g_state.anim.type, false);
+        g_state.isZooming |= interp(g_state.viewCur.z, g_state.anim.v0.z, g_state.anim.v1.z, g_state.anim.t0, g_state.anim.t1, T, g_state.anim.type, true);
     }
 
-    const float scale = g_state.scale(g_state.viewCur.z);
+    const float scale = g_state.getScale(g_state.viewCur.z);
     [[maybe_unused]] const float iscale = (1.0/scale)/ImGui::GetIO().DisplayFramebufferScale.x;
 
 #ifdef USE_LINE_SHADER
@@ -1131,7 +1439,7 @@ void updatePre() {
 #endif
 
     if (g_state.isMoving || g_state.isZooming) {
-        g_state.nUpdates = 1;
+        g_state.nUpdates = std::max(1, g_state.nUpdates);
     }
 
     if (T >= g_state.anim.t1) {
@@ -1302,7 +1610,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
 
     g_addNode = [&](const NodeId & id, const std::string & username, int level, int type, int x, int y) {
         g_nodes[id] = {
-            id, username, level, type, float(x), float(y),
+            id, id, username, level, type, float(x), float(y),
         };
     };
 
@@ -1331,6 +1639,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         if (id == 0) return;
         g_state.focusId = id;
         g_state.selectedId = g_state.focusId;
+        g_state.doSelect = true;
     };
 
     g_getActionOpenUrl = [&]() {
