@@ -14,7 +14,7 @@ Visit the following link to see what it looks like:
 https://tweet2doom.github.io
 
 <p align="center">
-<img src="https://user-images.githubusercontent.com/1991296/137181096-db4df596-abe4-4b8a-8783-d9afe3673ee6.png"></img><br>
+<img src="https://user-images.githubusercontent.com/1991296/139575872-af594c30-e77a-4655-9de0-9dad25a4cf39.gif"></img><br>
 Fig 1. The state tree of <a href="https://twitter.com/tweet2doom">@tweet2doom</a>
 </p>
 
