@@ -50,7 +50,8 @@ rm -rf .savegame
 ln -sf $dir_doomreplay/.savegame .savegame
 
 for i in $id_render ; do
-    $dir_doomreplay/doomgeneric \
+    # generate video
+    SDL_AUDIODRIVER=disk $dir_doomreplay/doomgeneric \
         -iwad $dir_doomreplay/doom1.wad \
         -input public/data/nodes/$i/history.txt \
         -output tmp/$i.mp4 \
@@ -60,6 +61,30 @@ for i in $id_render ; do
         -render_frame \
         -render_input \
         -render_username || result=$?
+
+    # generate audio
+    SDL_AUDIODRIVER=disk $dir_doomreplay/doomgeneric \
+        -iwad $dir_doomreplay/doom1.wad \
+        -input public/data/nodes/$i/history.txt \
+        -output tmp/$i.mp4 \
+        -nrecord $nrecord \
+        -framerate 35 \
+        -nfreeze $nfreeze \
+        -render_frame \
+        -render_input \
+        -render_username \
+        -disable_video | tee tmp/$i.log
+
+    sound_offset_ms=$(cat tmp/$i.log | grep "DOOMREPLAY SOUND START TIMESTAMP" | awk '{print $6}')
+    sound_offset_bytes=$(echo "${sound_offset_ms}*4*44.100" | bc | awk '{printf("%d\n",$1)}')
+    sound_offset_bytes=$(( ($sound_offset_bytes/4)*4 ))
+    dd if="sdlaudio.raw" of="sdlaudio2.raw" bs=$sound_offset_bytes skip=1
+    mv sdlaudio2.raw sdlaudio.raw
+    mv sdlaudio.raw tmp/
+    ffmpeg -f s16le -channels 2 -sample_rate 44100 -i tmp/sdlaudio.raw tmp/audio.mp4
+    ffmpeg -i tmp/$i.mp4 -i tmp/audio.mp4 -c copy -map 0:v -map 1:a tmp/${i}_new.mp4
+    mv tmp/${i}_new.mp4 tmp/${i}.mp4
+    rm tmp/audio.mp4
 
     $dir_tweet2doom/parse-history public/data/nodes/$i/history.txt $nrecord 35 tmp/command_$i 0 1 > /dev/null
 done
